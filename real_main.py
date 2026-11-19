@@ -104,7 +104,7 @@ KV = r"""
 
 <H1@Label>:
     bold: True
-    font_size: "18sp"
+    font_size: "20sp"
     color: C_TEXT
     size_hint_y: None
     height: self.texture_size[1] + dp(2)
@@ -149,72 +149,85 @@ KV = r"""
 
 <Card>:
     orientation: "vertical"
-    padding: dp(16)
+    padding: dp(18)
     spacing: dp(10)
     size_hint_y: None
     height: self.minimum_height
     canvas.before:
         Color:
-            rgba: 0.10, 0.10, 0.12, 0.08
+            rgba: 0.60, 0.42, 0.02, 0.05
         RoundedRectangle:
-            pos: self.x, self.y - dp(3)
-            size: self.size
-            radius: [dp(22)]
+            pos: self.x - dp(3), self.y - dp(8)
+            size: self.width + dp(6), self.height + dp(6)
+            radius: [dp(32)]
+        Color:
+            rgba: 0.10, 0.10, 0.12, 0.06
+        RoundedRectangle:
+            pos: self.x - dp(1), self.y - dp(4)
+            size: self.width + dp(2), self.height + dp(2)
+            radius: [dp(29)]
         Color:
             rgba: C_SURFACE
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(22)]
+            radius: [dp(26)]
         Color:
-            rgba: 0.10, 0.10, 0.12, 0.08
+            rgba: 0.10, 0.10, 0.12, 0.05
         Line:
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(22)
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(26)
             width: dp(1)
         Color:
-            rgba: 0.98, 0.76, 0.10, 0.95
+            rgba: 1, 1, 1, 1
         RoundedRectangle:
-            pos: self.x + dp(22), self.top - dp(2)
-            size: self.width - dp(44), dp(2)
-            radius: [dp(1)]
+            pos: self.x + dp(26), self.top - dp(3)
+            size: self.width - dp(52), dp(3)
+            radius: [dp(2)]
+            texture: app.grad_h
 
 <RoundButton>:
     size_hint_y: None
-    height: dp(48)
+    height: dp(52)
     bold: True
     font_size: "14sp"
     color: self.fg
     canvas.before:
         Color:
-            rgba: (0.98, 0.74, 0.08, 0.30) if (self.kind == "primary" and not self.disabled) else (0, 0, 0, 0)
+            rgba: (0.98, 0.74, 0.08, 0.36) if (self.kind == "primary" and not self.disabled) else (0, 0, 0, 0)
         RoundedRectangle:
-            pos: self.x - dp(2), self.y - dp(4)
-            size: self.width + dp(4), self.height + dp(4)
-            radius: [dp(17)]
+            pos: self.x + dp(3), self.y - dp(6)
+            size: self.width - dp(6), self.height
+            radius: [dp(20)]
         Color:
             rgba: self.bg_color
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(15)]
+            radius: [dp(18)]
         Color:
             rgba: (1, 1, 1, 1) if (self.kind == "primary" and not self.disabled) else (0, 0, 0, 0)
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(15)]
+            radius: [dp(18)]
             texture: app.grad_h
         Color:
-            rgba: (1, 1, 1, 0.10) if not self.disabled else (0, 0, 0, 0)
+            rgba: (1, 1, 1, 0.18) if not self.disabled else (0, 0, 0, 0)
         RoundedRectangle:
-            pos: self.x + dp(8), self.y + self.height * 0.55
-            size: self.width - dp(16), self.height * 0.38
-            radius: [dp(10)]
+            pos: self.x + dp(10), self.y + self.height * 0.56
+            size: self.width - dp(20), self.height * 0.34
+            radius: [dp(12)]
+        Color:
+            rgba: (0, 0, 0, 0.09) if self.state == "down" else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(18)]
 
 <RoundInput>:
     multiline: False
     size_hint_y: None
-    height: dp(46)
+    height: dp(50)
     background_normal: ""
     background_active: ""
     background_disabled_normal: ""
@@ -226,23 +239,29 @@ KV = r"""
     hint_text_color: 0.62, 0.64, 0.68, 1
     selection_color: 0.98, 0.76, 0.10, 0.35
     font_size: "15sp"
-    padding: [dp(14), max(dp(10), (self.height - self.line_height) / 2)]
+    padding: [dp(16), max(dp(10), (self.height - self.line_height) / 2)]
     canvas.before:
+        Color:
+            rgba: (0.98, 0.76, 0.10, 0.26) if self.focus else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.x - dp(3), self.y - dp(3)
+            size: self.width + dp(6), self.height + dp(6)
+            radius: [dp(19)]
         Color:
             rgba: (1, 1, 1, 1) if self.focus else C_FIELD
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(14)]
+            radius: [dp(16)]
         Color:
-            rgba: C_CYAN if self.focus else (0.10, 0.10, 0.12, 0.16)
+            rgba: C_CYAN if self.focus else (0.10, 0.10, 0.12, 0.10)
         Line:
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(14)
-            width: dp(1.4) if self.focus else dp(1)
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
+            width: dp(1.5) if self.focus else dp(1)
 
 <RoundSpinner>:
     size_hint_y: None
-    height: dp(46)
+    height: dp(50)
     background_normal: ""
     background_down: ""
     background_color: 0, 0, 0, 0
@@ -258,11 +277,11 @@ KV = r"""
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(14)]
+            radius: [dp(16)]
         Color:
-            rgba: 0.10, 0.10, 0.12, 0.16
+            rgba: 0.10, 0.10, 0.12, 0.10
         Line:
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(14)
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
             width: dp(1)
         Color:
             rgba: C_CYAN
@@ -301,20 +320,27 @@ KV = r"""
     padding: dp(8)
     canvas.before:
         Color:
+            rgba: 0.10, 0.10, 0.12, 0.05
+        RoundedRectangle:
+            pos: self.x, self.y - dp(3)
+            size: self.size
+            radius: [dp(22)]
+        Color:
             rgba: C_SURFACE
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(18)]
+            radius: [dp(22)]
         Color:
-            rgba: 0.10, 0.10, 0.12, 0.08
-        Line:
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(18)
-            width: dp(1)
+            rgba: root.accent[0], root.accent[1], root.accent[2], 0.9
+        RoundedRectangle:
+            pos: self.center_x - dp(10), self.top - dp(7)
+            size: dp(20), dp(3)
+            radius: [dp(2)]
     Label:
         text: root.value
         bold: True
-        font_size: "20sp"
+        font_size: "21sp"
         color: root.accent
     Label:
         text: root.caption
@@ -325,37 +351,44 @@ KV = r"""
 <NavTab>:
     font_size: "12sp"
     bold: self.active
-    color: (0.68, 0.45, 0.0, 1) if self.active else C_MUTED
+    color: (0.18, 0.13, 0.0, 1) if self.active else C_MUTED
     canvas.before:
         Color:
-            rgba: (0.98, 0.76, 0.10, 0.22) if self.active else (0, 0, 0, 0)
+            rgba: (0.98, 0.76, 0.10, 0.28) if self.active else (0, 0, 0, 0)
         RoundedRectangle:
-            pos: self.x + dp(6), self.y + dp(8)
-            size: self.width - dp(12), self.height - dp(16)
-            radius: [dp(16)]
+            pos: self.x + dp(3), self.y + dp(5)
+            size: self.width - dp(6), self.height - dp(6)
+            radius: [dp(22)]
         Color:
-            rgba: C_CYAN if self.active else (0, 0, 0, 0)
+            rgba: (1, 1, 1, 1) if self.active else (0, 0, 0, 0)
         RoundedRectangle:
-            pos: self.x + self.width * 0.32, self.top - dp(3)
-            size: self.width * 0.36, dp(3)
-            radius: [dp(2)]
+            pos: self.x + dp(3), self.y + dp(5)
+            size: self.width - dp(6), self.height - dp(6)
+            radius: [dp(22)]
+            texture: app.grad_h
 
 <IpRow>:
     size_hint_y: None
-    height: dp(54)
-    padding: dp(12), dp(6)
+    height: dp(58)
+    padding: dp(14), dp(6)
     spacing: dp(8)
     canvas.before:
+        Color:
+            rgba: 0.10, 0.10, 0.12, 0.05
+        RoundedRectangle:
+            pos: self.x, self.y - dp(2)
+            size: self.size
+            radius: [dp(18)]
         Color:
             rgba: C_SURFACE
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(14)]
+            radius: [dp(18)]
         Color:
-            rgba: 0.10, 0.10, 0.12, 0.08
+            rgba: 0.10, 0.10, 0.12, 0.06
         Line:
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(14)
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(18)
             width: dp(1)
     BoxLayout:
         orientation: "vertical"
@@ -469,7 +502,7 @@ KV = r"""
 <ToastLabel>:
     size_hint: None, None
     size: self.texture_size[0] + dp(32), self.texture_size[1] + dp(18)
-    pos_hint: {"center_x": .5, "y": .16}
+    pos_hint: {"center_x": .5, "y": .20}
     font_size: "13sp"
     color: 1, 1, 1, 1
     canvas.before:
@@ -548,29 +581,51 @@ FloatLayout:
 
         GradientBox:
             size_hint_y: None
-            height: dp(68)
-            padding: dp(16), dp(11)
-            spacing: dp(12)
+            height: dp(80)
+            padding: dp(18), dp(13)
+            spacing: dp(14)
+            canvas.after:
+                Color:
+                    rgba: 1, 1, 1, 0.20
+                Ellipse:
+                    pos: self.right - dp(80), self.y - dp(36)
+                    size: dp(120), dp(120)
+                Color:
+                    rgba: 1, 1, 1, 0.14
+                Ellipse:
+                    pos: self.right - dp(150), self.top - dp(30)
+                    size: dp(70), dp(70)
+                Color:
+                    rgba: 0.10, 0.10, 0.12, 0.07
+                Rectangle:
+                    pos: self.x, self.y - dp(2)
+                    size: self.width, dp(2)
             Label:
                 text: "A"
                 bold: True
-                font_size: "22sp"
-                color: 0.12, 0.13, 0.15, 1
+                font_size: "24sp"
+                color: 0.80, 0.55, 0.0, 1
                 size_hint_x: None
-                width: dp(46)
+                width: dp(52)
                 canvas.before:
                     Color:
-                        rgba: 1, 1, 1, 0.24
+                        rgba: 0.45, 0.30, 0.0, 0.18
+                    RoundedRectangle:
+                        pos: self.x, self.y - dp(3)
+                        size: self.size
+                        radius: [dp(18)]
+                    Color:
+                        rgba: 1, 1, 1, 0.96
                     RoundedRectangle:
                         pos: self.pos
                         size: self.size
-                        radius: [dp(15)]
+                        radius: [dp(18)]
             BoxLayout:
                 orientation: "vertical"
                 Label:
                     text: "Aminium Studio"
                     bold: True
-                    font_size: "19sp"
+                    font_size: "20sp"
                     color: 0.12, 0.13, 0.15, 1
                     halign: "left"
                     valign: "bottom"
@@ -579,7 +634,7 @@ FloatLayout:
                     id: hdr_sub
                     text: ""
                     font_size: "12sp"
-                    color: 0.35, 0.25, 0.02, 0.95
+                    color: 0.30, 0.22, 0.02, 0.90
                     halign: "left"
                     valign: "top"
                     text_size: self.size
@@ -594,19 +649,27 @@ FloatLayout:
         BoxLayout:
             id: nav
             size_hint_y: None
-            height: dp(60)
-            padding: dp(6), 0
+            height: dp(82)
+            padding: dp(20), dp(15)
             canvas.before:
                 Color:
-                    rgba: 1, 1, 1, 1
-                Rectangle:
-                    pos: self.pos
-                    size: self.size
+                    rgba: 0.60, 0.42, 0.02, 0.05
+                RoundedRectangle:
+                    pos: self.x + dp(11), self.y + dp(6)
+                    size: self.width - dp(22), self.height - dp(10)
+                    radius: [dp(34)]
                 Color:
                     rgba: 0.10, 0.10, 0.12, 0.07
-                Rectangle:
-                    pos: self.x, self.top
-                    size: self.width, dp(1)
+                RoundedRectangle:
+                    pos: self.x + dp(12), self.y + dp(8)
+                    size: self.width - dp(24), self.height - dp(13)
+                    radius: [dp(33)]
+                Color:
+                    rgba: 1, 1, 1, 1
+                RoundedRectangle:
+                    pos: self.x + dp(12), self.y + dp(10)
+                    size: self.width - dp(24), self.height - dp(14)
+                    radius: [dp(31)]
 
 
 <TokenScreen>:
@@ -1279,7 +1342,8 @@ class AminiumApp(App):
         root = Builder.load_string(KV)
         self.root_widget = root
         self.sm = root.ids.sm
-        self.sm.transition = SlideTransition(duration=0.22)
+        self.sm.transition = SlideTransition(duration=0.24)
+        self.sm.bind(current=lambda _sm, name: self._animate_in(name))
         self.logbar = root.ids.logbar
         self.hdr_sub = root.ids.hdr_sub
         for scr in (TokenScreen(), ScanScreen(), BuildScreen(), OutputScreen(), ManageScreen()):
@@ -1326,6 +1390,17 @@ class AminiumApp(App):
             if line.startswith("ERROR"):
                 self.toast(line[:90])
         Clock.schedule_once(ui, 0)
+
+    def _animate_in(self, name):
+        """cards of the opened screen fade in one after the other"""
+        try:
+            page = self.sm.get_screen(name).children[0].children[0]
+            kids = list(reversed(page.children))[:8]
+        except Exception:
+            return
+        for i, w in enumerate(kids):
+            w.opacity = 0
+            Clock.schedule_once(lambda dt, w=w: Animation(opacity=1, duration=0.35, t="out_cubic").start(w), 0.06 + 0.07 * i)
 
     def toast(self, text):
         t = ToastLabel(text=text, opacity=0)
