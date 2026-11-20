@@ -7,7 +7,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,zip,json,md
 source.exclude_dirs = .github,bin,.buildozer,venv,__pycache__
 version = 1.0.0
-requirements = python3,kivy==2.3.0,requests==2.31.0,urllib3==1.26.18,charset-normalizer==3.3.2,idna==3.6,certifi,qrcode==7.4.2,pypng,typing_extensions,pyjnius,android
+requirements = python3,kivy==2.3.0,requests==2.31.0,urllib3==1.26.18,chardet==3.0.4,idna==3.6,certifi,qrcode==7.4.2,pypng,typing_extensions,pyjnius,android,charset-normalizer
 orientation = portrait
 fullscreen = 0
 icon.filename = %(source.dir)s/icon.png
