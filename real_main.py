@@ -1543,10 +1543,14 @@ def links_from_base64(raw: str) -> list:
 _LINK_PORT = re.compile(r"^([a-z0-9]+://[^@/?#]+@(?:\[[^\]]+\]|[^:/?#]+)):(\d+)(.*)$", re.I | re.S)
 
 
+CHOSEN_PORTS: dict = {}      # tls(bool) -> ports picked in the app (empty = all Cloudflare ports)
+MAX_LINKS = 0                # 0 = no limit; otherwise the most config links we hand out
+
+
 def expand_ports(links: list, tls: bool) -> list:
     """The panel may hand out one port per address. Make every link available on ALL Cloudflare ports of its kind
     (TLS: 443 2053 2083 2087 2096 8443 / plain: 80 8080 8880 2052 2082 2086 2095): same address, same SNI/host/path, only the port changes."""
-    ports = TLS_PORTS if tls else PLAIN_PORTS
+    ports = CHOSEN_PORTS.get(tls) or (TLS_PORTS if tls else PLAIN_PORTS)
     out, seen = [], set()
     for ln in links:
         m = _LINK_PORT.match(ln)
@@ -1584,9 +1588,11 @@ def fetch_configs(sub: str, log, tls: bool = True) -> dict:
             log(f"{key}: {e}")
     raw = links_from_base64(out["text"].get("v2ray", ""))
     out["links"] = expand_ports(raw, tls)
+    if MAX_LINKS and len(out["links"]) > MAX_LINKS:
+        out["links"] = out["links"][:MAX_LINKS]
     if raw and len(out["links"]) != len(raw):
         out["text"]["v2ray"] = base64.b64encode("\n".join(out["links"]).encode()).decode()      # plain-links file/preview: all ports too
-        log(f"Plain links: {len(raw)} from the panel -> {len(out['links'])} on all {len(TLS_PORTS if tls else PLAIN_PORTS)} ports.")
+        log(f"Plain links: {len(raw)} from the panel -> {len(out['links'])} on {len(CHOSEN_PORTS.get(tls) or (TLS_PORTS if tls else PLAIN_PORTS))} ports.")
     return out
 
 
@@ -2607,6 +2613,7 @@ class Wizard(BoxLayout):
         self.build_ui()
         set_net_log(self.log)
         self.fill_from_cfg()
+        self.apply_ports()
         self.roll_all()                       # every launch: new random name / password / paths / UUID (hidden from the user)
         self.log("New random name, password, paths and UUID generated for this launch; every scan draws fresh random IPv4/IPv6 addresses.")
         self.refresh_token_view()
@@ -2630,7 +2637,7 @@ class Wizard(BoxLayout):
             "source": self.e_source.get().strip(), "custom_domain": self.e_domain.get().strip(), "decoy": self.e_decoy.get().strip(),
             "proxy": self.e_proxy.get().strip(), "tg_token": self.e_tgtoken.get().strip(), "tg_secret": self.e_tgsecret.get().strip(),
             "tg_admins": self.e_tgadmins.get().strip(), "verify_ws": bool(self.v_verify_ws.get()),
-            "remark": self.e_remark.get().strip(), "scan": sf, "deployments": self.deployments,
+            "remark": self.e_remark.get().strip(), "max_cfg": self.e_maxcfg.get().strip(), "ports_tls": self.chosen_ports(True), "ports_plain": self.chosen_ports(False), "scan": sf, "deployments": self.deployments,
         }
         try:
             CFG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3057,6 +3064,7 @@ class Wizard(BoxLayout):
     def on_conn_change(self, _=None):
         tls = self.v_conn.get() == "TLS"
         self.set_entry(self.s_port, "443" if tls else "80")
+        self.refresh_ports()
         self.lbl_conn.configure(
             text=("Encrypted (TLS) on ports 443 / 8443 / 2053 / 2083 / 2087 / 2096. Best choice for most networks." if tls else
                   "Plain WebSocket on ports 80 / 8080 / 8880 / 2052 / 2082 / 2086 / 2095. Usually needs your own domain on Cloudflare "
@@ -3189,6 +3197,21 @@ class Wizard(BoxLayout):
         self.note(c, "Tip: pages.dev is filtered on many networks (the config's SNI is that name). Workers or your own domain is safer.")
         self.e_remark, _ = self.row(c, "Config name", placeholder="Aminium")
         self.note(c, "Every config shows up in your VPN app as  NAME-vless-IP-port.  English letters, digits, - . _  (max 24).")
+        self.e_maxcfg, _ = self.row(c, "Max configs (total)", placeholder="150", numeric=True)
+        self.note(c, "Total number of configs is kept at or below this (IPs x ports x 2 protocols). Fewer ports = more IPs fit in.")
+        self.v_ports = {p: Var(True) for p in TLS_PORTS + PLAIN_PORTS}
+        self.ports_tls_box, self.ports_plain_box = VBox(spacing=dp(2)), VBox(spacing=dp(2))
+        for box, plist in ((self.ports_tls_box, TLS_PORTS), (self.ports_plain_box, PLAIN_PORTS)):
+            g2 = GridLayout(cols=2, spacing=dp(4), size_hint_y=None, row_default_height=dp(40), row_force_default=True)
+            g2.bind(minimum_height=g2.setter("height"))
+            for p in plist:
+                ck = Check(str(p), self.v_ports[p])
+                ck.size_hint_x = 1
+                g2.add_widget(ck)
+            box.add_widget(g2)
+        self.slot_ports = Holder()
+        self.field(c, "Ports the configs may use (tick the ones that work on your network)", self.slot_ports)
+        set_children(self.slot_ports, self.ports_tls_box)
         self.v_verify_ws = Var(True)
         c.add_widget(Check("Test the IPs on my new worker (real WebSocket, with and without TLS fragment)", self.v_verify_ws))
         self.e_proxy, _ = self.row(c, "Proxy (optional)", placeholder="127.0.0.1:10809   or   socks5h://127.0.0.1:10808",
@@ -3247,8 +3270,9 @@ class Wizard(BoxLayout):
     def refresh_build_summary(self):
         n = len(self.ips)
         tls = self.v_conn.get() == "TLS"
-        ports = len(TLS_PORTS if tls else PLAIN_PORTS)
-        self.lbl_sum.configure(text=f"{n} clean IPs (+ your worker's own address)  \u00d7  {ports} ports  \u00d7  2 protocols\n=  up to {(n + 1) * ports * 2} configs\n"
+        ports = len(self.chosen_ports(tls))
+        n = min(n, self.keep_limit())
+        self.lbl_sum.configure(text=f"{n} clean IPs (+ your worker's own address)  \u00d7  {ports} ports  \u00d7  2 protocols\n=  up to {min((n + 1) * ports * 2, self.max_cfg())} configs\n"
                                     f"Connection: {'TLS' if tls else 'No TLS'}")
         self.disc2.set_blips([(r["ip"], r["score"]) for r in (self.job.snapshot()["results"] if self.job else [])])
         self.disc2.caption = "ready"
@@ -3265,6 +3289,33 @@ class Wizard(BoxLayout):
         self.set_entry(self.e_wspath, "/stream/" + rnd(18, LOWER))
         self.set_entry(self.e_cron, rnd(24))
         self.set_entry(self.e_uuid, str(uuidlib.uuid4()))
+
+    def max_cfg(self) -> int:
+        try:
+            return max(1, min(200, int(self.e_maxcfg.get().strip())))
+        except ValueError:
+            return 150
+
+    def chosen_ports(self, tls) -> list:
+        src = TLS_PORTS if tls else PLAIN_PORTS
+        sel = [p for p in src if self.v_ports[p].get()]
+        return sel or [src[0]]
+
+    def refresh_ports(self):
+        set_children(self.slot_ports, self.ports_tls_box if self.v_conn.get() == "TLS" else self.ports_plain_box)
+
+    def apply_ports(self):
+        """Push the chosen ports / limit into the engine (panel settings + link expansion + total cap)."""
+        global MAX_LINKS
+        PANEL_STYLE["ports"] = self.chosen_ports(True)
+        PANEL_STYLE["portsHttp"] = self.chosen_ports(False)
+        CHOSEN_PORTS[True], CHOSEN_PORTS[False] = PANEL_STYLE["ports"], PANEL_STYLE["portsHttp"]
+        MAX_LINKS = self.max_cfg()
+
+    def keep_limit(self) -> int:
+        """How many clean IPs fit under the config limit: (IPs + worker address) x ports x 2 protocols <= max."""
+        per = len(self.chosen_ports(self.v_conn.get() == "TLS")) * 2
+        return max(1, min(self.keep_count(), self.max_cfg() // per - 1))
 
     @staticmethod
     def clean_remark(v) -> str:
@@ -3401,6 +3452,11 @@ class Wizard(BoxLayout):
         self.set_entry(self.e_domain, c.get("custom_domain", ""))
         self.set_entry(self.e_decoy, c.get("decoy", ""))
         self.set_entry(self.e_remark, c.get("remark", "Aminium"))
+        self.set_entry(self.e_maxcfg, c.get("max_cfg") or "150")
+        for _p in TLS_PORTS:
+            self.v_ports[_p].set(_p in (c.get("ports_tls") or TLS_PORTS))
+        for _p in PLAIN_PORTS:
+            self.v_ports[_p].set(_p in (c.get("ports_plain") or PLAIN_PORTS))
         self.set_entry(self.e_proxy, c.get("proxy", ""))
         self.use_proxy()
         self.set_entry(self.e_tgtoken, c.get("tg_token", ""))
@@ -3434,6 +3490,8 @@ class Wizard(BoxLayout):
             panel = "/" + panel
             self.set_entry(self.e_panel, panel)
         self.use_proxy(announce=True)
+        self.apply_ports()
+        self.log(f"Config limit {self.max_cfg()}: using up to {self.keep_limit()} clean IPs on ports {self.chosen_ports(self.v_conn.get() == 'TLS')}.")
         ROUTE_IPS[:] = list(self.pool or self.ips)
         ROUTES.clear()
         DIRECT_BAD.clear()
@@ -3451,7 +3509,7 @@ class Wizard(BoxLayout):
             "uuid": self.e_uuid.get().strip(), "decoy": self.e_decoy.get(), "tg_token": self.e_tgtoken.get(),
             "tg_secret": self.e_tgsecret.get(), "tg_admins": self.e_tgadmins.get(), "domain": self.e_domain.get().strip().lower(),
             "d1": bool(self.v_d1.get()), "verify_ws": bool(self.v_verify_ws.get()), "scan": self.scan_form(),
-            "ips": list(self.pool or self.ips), "keep": self.keep_count(), "tls": self.v_conn.get() == "TLS",
+            "ips": list(self.pool or self.ips), "keep": self.keep_limit(), "tls": self.v_conn.get() == "TLS",
             "remark": self.clean_remark(self.e_remark.get()),
         }
         threading.Thread(target=self.build_worker, args=(project, source, panel, mode, form), daemon=True).start()
