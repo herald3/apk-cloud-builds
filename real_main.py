@@ -42,6 +42,7 @@ from kivy.uix.widget import Widget
 from kivy.utils import platform
 
 import aminium_core as core
+import vpn_core
 
 # ───────────────────────────── Android runtime permissions ─────────────────────────────
 if platform == "android":
@@ -52,21 +53,22 @@ if platform == "android":
         pass
 
 # ───────────────────────────── palette ─────────────────────────────
-C_PRIMARY = (0.98, 0.74, 0.08, 1)     # golden yellow
-C_CYAN = (0.99, 0.80, 0.15, 1)        # light yellow accent
-C_TEXT = (0.12, 0.13, 0.15, 1)
-C_MUTED = (0.45, 0.47, 0.52, 1)
+C_PRIMARY = (0.33, 0.30, 0.92, 1)     # indigo
+C_CYAN = (0.25, 0.60, 0.98, 1)        # azure accent
+C_TEXT = (0.10, 0.12, 0.22, 1)
+C_MUTED = (0.42, 0.46, 0.58, 1)
 C_OK = (0.07, 0.58, 0.30, 1)
 C_ERR = (0.82, 0.20, 0.25, 1)
 C_SURFACE = (1.0, 1.0, 1.0, 1)        # cards / popups
-C_FIELD = (0.965, 0.965, 0.955, 1)    # inputs
-C_BG = (0.98, 0.98, 0.972, 1)
+C_FIELD = (0.940, 0.950, 0.982, 1)    # inputs
+C_BG = (0.955, 0.962, 0.988, 1)
 
 TABS = [
     ("token", "Token", "Step 1  -  Connect Cloudflare"),
     ("scan", "Radar", "Step 2  -  Find clean IPs"),
     ("build", "Build", "Step 3  -  Deploy your panel"),
     ("output", "Configs", "Step 4  -  Your configs"),
+    ("connect", "VPN", "Real connection  -  ping & connect"),
     ("manage", "Saved", "Everything you built on this phone"),
 ]
 
@@ -95,12 +97,12 @@ def gradient_texture(c1, c2, vertical=True):
 # ───────────────────────────── KV (layout + styles) ─────────────────────────────
 KV = r"""
 #:import dp kivy.metrics.dp
-#:set C_PRIMARY (0.98, 0.74, 0.08, 1)
-#:set C_CYAN (0.99, 0.80, 0.15, 1)
-#:set C_TEXT (0.12, 0.13, 0.15, 1)
-#:set C_MUTED (0.45, 0.47, 0.52, 1)
+#:set C_PRIMARY (0.33, 0.30, 0.92, 1)
+#:set C_CYAN (0.25, 0.60, 0.98, 1)
+#:set C_TEXT (0.10, 0.12, 0.22, 1)
+#:set C_MUTED (0.42, 0.46, 0.58, 1)
 #:set C_SURFACE (1, 1, 1, 1)
-#:set C_FIELD (0.965, 0.965, 0.955, 1)
+#:set C_FIELD (0.940, 0.950, 0.982, 1)
 
 <H1@Label>:
     bold: True
@@ -155,7 +157,7 @@ KV = r"""
     height: self.minimum_height
     canvas.before:
         Color:
-            rgba: 0.60, 0.42, 0.02, 0.05
+            rgba: 0.15, 0.20, 0.60, 0.06
         RoundedRectangle:
             pos: self.x - dp(3), self.y - dp(8)
             size: self.width + dp(6), self.height + dp(6)
@@ -193,7 +195,7 @@ KV = r"""
     color: self.fg
     canvas.before:
         Color:
-            rgba: (0.98, 0.74, 0.08, 0.36) if (self.kind == "primary" and not self.disabled) else (0, 0, 0, 0)
+            rgba: (0.33, 0.30, 0.92, 0.34) if (self.kind == "primary" and not self.disabled) else (0, 0, 0, 0)
         RoundedRectangle:
             pos: self.x + dp(3), self.y - dp(6)
             size: self.width - dp(6), self.height
@@ -232,17 +234,17 @@ KV = r"""
     background_active: ""
     background_disabled_normal: ""
     background_color: 0, 0, 0, 0
-    foreground_color: 0.12, 0.13, 0.15, 1
+    foreground_color: 0.10, 0.12, 0.22, 1
     disabled_foreground_color: 0.55, 0.57, 0.60, 1
     cursor_color: C_CYAN
     cursor_width: dp(2)
     hint_text_color: 0.62, 0.64, 0.68, 1
-    selection_color: 0.98, 0.76, 0.10, 0.35
+    selection_color: 0.33, 0.40, 0.95, 0.30
     font_size: "15sp"
     padding: [dp(16), max(dp(10), (self.height - self.line_height) / 2)]
     canvas.before:
         Color:
-            rgba: (0.98, 0.76, 0.10, 0.26) if self.focus else (0, 0, 0, 0)
+            rgba: (0.33, 0.40, 0.95, 0.22) if self.focus else (0, 0, 0, 0)
         RoundedRectangle:
             pos: self.x - dp(3), self.y - dp(3)
             size: self.width + dp(6), self.height + dp(6)
@@ -265,7 +267,7 @@ KV = r"""
     background_normal: ""
     background_down: ""
     background_color: 0, 0, 0, 0
-    color: 0.12, 0.13, 0.15, 1
+    color: 0.10, 0.12, 0.22, 1
     font_size: "15sp"
     halign: "left"
     valign: "middle"
@@ -292,8 +294,8 @@ KV = r"""
 <SpinnerOption>:
     background_normal: ""
     background_down: ""
-    background_color: (0.99, 0.94, 0.72, 1) if self.state == "down" else (1, 1, 1, 1)
-    color: 0.12, 0.13, 0.15, 1
+    background_color: (0.90, 0.92, 1.0, 1) if self.state == "down" else (1, 1, 1, 1)
+    color: 0.10, 0.12, 0.22, 1
     size_hint_y: None
     height: dp(44)
     font_size: "15sp"
@@ -351,10 +353,10 @@ KV = r"""
 <NavTab>:
     font_size: "12sp"
     bold: self.active
-    color: (0.18, 0.13, 0.0, 1) if self.active else C_MUTED
+    color: (1, 1, 1, 1) if self.active else C_MUTED
     canvas.before:
         Color:
-            rgba: (0.98, 0.76, 0.10, 0.28) if self.active else (0, 0, 0, 0)
+            rgba: (0.33, 0.30, 0.92, 0.22) if self.active else (0, 0, 0, 0)
         RoundedRectangle:
             pos: self.x + dp(3), self.y + dp(5)
             size: self.width - dp(6), self.height - dp(6)
@@ -480,7 +482,7 @@ KV = r"""
     padding: dp(30), 0, dp(14), 0
     canvas.before:
         Color:
-            rgba: 0.955, 0.955, 0.945, 1
+            rgba: 0.925, 0.935, 0.975, 1
         Rectangle:
             pos: self.pos
             size: self.size
@@ -507,13 +509,13 @@ KV = r"""
     color: 1, 1, 1, 1
     canvas.before:
         Color:
-            rgba: 0.14, 0.15, 0.17, 0.97
+            rgba: 0.09, 0.11, 0.26, 0.97
         RoundedRectangle:
             pos: self.pos
             size: self.size
             radius: [dp(18)]
         Color:
-            rgba: 0.98, 0.78, 0.20, 0.9
+            rgba: 0.55, 0.62, 1.0, 0.9
         Line:
             rounded_rectangle: self.x, self.y, self.width, self.height, dp(18)
             width: dp(1.1)
@@ -525,14 +527,14 @@ KV = r"""
         text: root.title
         bold: True
         font_size: "13sp"
-        color: 0.62, 0.42, 0.0, 1
+        color: 0.25, 0.30, 0.88, 1
         size_hint: None, None
         size: self.texture_size
         pos_hint: {"center_x": .5, "top": .975}
     Label:
         text: root.subtitle
         font_size: "12sp"
-        color: 0.45, 0.47, 0.52, 1
+        color: 0.42, 0.46, 0.58, 1
         size_hint: None, None
         size: self.texture_size
         pos_hint: {"center_x": .5, "y": .03}
@@ -552,12 +554,12 @@ FloatLayout:
         orientation: "vertical"
         canvas.before:
             Color:
-                rgba: 0.98, 0.98, 0.972, 1
+                rgba: 0.955, 0.962, 0.988, 1
             Rectangle:
                 pos: self.pos
                 size: self.size
             Color:
-                rgba: 0.98, 0.76, 0.10, 0.10
+                rgba: 0.33, 0.30, 0.92, 0.10
             Ellipse:
                 pos: self.x - self.width * 0.55, self.top - self.width * 0.75
                 size: self.width * 1.3, self.width * 1.3
@@ -568,7 +570,7 @@ FloatLayout:
                 pos: self.x - self.width * 0.25, self.top - self.width * 0.45
                 size: self.width * 0.7, self.width * 0.7
             Color:
-                rgba: 1.0, 0.88, 0.40, 0.14
+                rgba: 0.25, 0.60, 0.98, 0.12
             Ellipse:
                 pos: self.right - self.width * 0.75, self.y - self.width * 0.55
                 size: self.width * 1.3, self.width * 1.3
@@ -604,12 +606,12 @@ FloatLayout:
                 text: "A"
                 bold: True
                 font_size: "24sp"
-                color: 0.80, 0.55, 0.0, 1
+                color: 0.33, 0.30, 0.92, 1
                 size_hint_x: None
                 width: dp(52)
                 canvas.before:
                     Color:
-                        rgba: 0.45, 0.30, 0.0, 0.18
+                        rgba: 0.08, 0.10, 0.45, 0.25
                     RoundedRectangle:
                         pos: self.x, self.y - dp(3)
                         size: self.size
@@ -626,7 +628,7 @@ FloatLayout:
                     text: "Aminium Studio"
                     bold: True
                     font_size: "20sp"
-                    color: 0.12, 0.13, 0.15, 1
+                    color: 1, 1, 1, 1
                     halign: "left"
                     valign: "bottom"
                     text_size: self.size
@@ -634,7 +636,7 @@ FloatLayout:
                     id: hdr_sub
                     text: ""
                     font_size: "12sp"
-                    color: 0.30, 0.22, 0.02, 0.90
+                    color: 1, 1, 1, 0.85
                     halign: "left"
                     valign: "top"
                     text_size: self.size
@@ -653,7 +655,7 @@ FloatLayout:
             padding: dp(20), dp(15)
             canvas.before:
                 Color:
-                    rgba: 0.60, 0.42, 0.02, 0.05
+                    rgba: 0.15, 0.20, 0.60, 0.06
                 RoundedRectangle:
                     pos: self.x + dp(11), self.y + dp(6)
                     size: self.width - dp(22), self.height - dp(10)
@@ -955,6 +957,10 @@ FloatLayout:
                         text: "Save all to device"
                         kind: "soft"
                         on_release: app.save_all_configs()
+                RoundButton:
+                    text: "Send all configs to the VPN tab"
+                    kind: "soft"
+                    on_release: app.vpn_send_built()
                 FieldLabel:
                     text: "Preview"
                 RoundInput:
@@ -990,6 +996,131 @@ FloatLayout:
                 height: self.minimum_height
                 spacing: dp(12)
                 padding: 0, 0, 0, dp(14)
+
+<CfgRow>:
+    size_hint_y: None
+    height: dp(62)
+    padding: dp(14), dp(8)
+    spacing: dp(8)
+    canvas.before:
+        Color:
+            rgba: 0.10, 0.10, 0.12, 0.05
+        RoundedRectangle:
+            pos: self.x, self.y - dp(2)
+            size: self.size
+            radius: [dp(18)]
+        Color:
+            rgba: (0.92, 0.94, 1.0, 1) if root.sel else C_SURFACE
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(18)]
+        Color:
+            rgba: (0.33, 0.30, 0.92, 0.95) if root.sel else (0.10, 0.10, 0.12, 0.06)
+        Line:
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(18)
+            width: dp(1.6) if root.sel else dp(1)
+    BoxLayout:
+        orientation: "vertical"
+        Label:
+            text: root.name
+            bold: True
+            font_size: "14sp"
+            color: C_TEXT
+            halign: "left"
+            valign: "bottom"
+            shorten: True
+            text_size: self.size
+        Label:
+            text: root.meta
+            font_size: "11sp"
+            color: C_MUTED
+            halign: "left"
+            valign: "top"
+            shorten: True
+            text_size: self.size
+    Label:
+        text: root.ping_text
+        bold: True
+        font_size: "13sp"
+        size_hint_x: None
+        width: dp(70)
+        color: (0.42, 0.46, 0.58, 1) if root.ping_kind == 0 else ((0.05, 0.50, 0.25, 1) if root.ping_kind == 1 else ((0.72, 0.46, 0.02, 1) if root.ping_kind == 2 else (0.78, 0.18, 0.22, 1)))
+        canvas.before:
+            Color:
+                rgba: (0.94, 0.94, 0.93, 1) if root.ping_kind == 0 else ((0.84, 0.96, 0.88, 1) if root.ping_kind == 1 else ((1, 0.94, 0.78, 1) if root.ping_kind == 2 else (1, 0.88, 0.89, 1)))
+            RoundedRectangle:
+                pos: self.x, self.y + dp(8)
+                size: self.width, self.height - dp(16)
+                radius: [dp(12)]
+
+<ConnectScreen>:
+    name: "connect"
+    BoxLayout:
+        orientation: "vertical"
+        padding: dp(14), dp(14), dp(14), 0
+        spacing: dp(12)
+        Card:
+            H1:
+                text: "Real connection"
+            Label:
+                id: lbl_vpn_state
+                text: "Disconnected"
+                bold: True
+                font_size: "16sp"
+                color: C_MUTED
+                size_hint_y: None
+                height: dp(24)
+                halign: "left"
+                valign: "middle"
+                text_size: self.size
+            Muted:
+                id: lbl_vpn_info
+                text: ""
+            Muted:
+                id: lbl_vpn_stats
+                text: ""
+            RoundButton:
+                id: btn_vpn_toggle
+                text: "Connect"
+                on_release: app.vpn_toggle()
+        Card:
+            BoxLayout:
+                size_hint_y: None
+                height: dp(50)
+                spacing: dp(8)
+                RoundButton:
+                    text: "Paste links"
+                    kind: "soft"
+                    on_release: app.vpn_paste()
+                RoundButton:
+                    id: btn_ping_all
+                    text: "Ping all"
+                    on_release: app.vpn_ping_all()
+            BoxLayout:
+                size_hint_y: None
+                height: dp(50)
+                spacing: dp(8)
+                RoundSpinner:
+                    id: sp_ping_mode
+                    text: "Real delay"
+                    values: ["Real delay", "Handshake", "TCP"]
+                RoundButton:
+                    text: "Sort by ping"
+                    kind: "soft"
+                    size_hint_x: 0.55
+                    on_release: app.vpn_sort()
+            Muted:
+                text: "Real delay sends a tiny request through the config and back (the same thing a VPN app measures). Handshake = TLS + WebSocket only. TCP = just reaching the IP."
+        ScrollView:
+            bar_width: dp(3)
+            BoxLayout:
+                id: cfg_list
+                orientation: "vertical"
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(10)
+                padding: 0, 0, 0, dp(14)
 """
 
 
@@ -1012,14 +1143,14 @@ class RoundSpinner(Spinner):
 
 class RoundButton(ButtonBehavior, Label):
     kind = StringProperty("primary")      # primary | soft | danger | ghost
-    bg_color = ListProperty([0.98, 0.74, 0.08, 1])
+    bg_color = ListProperty([0.33, 0.30, 0.92, 1])
     fg = ListProperty([1, 1, 1, 1])
 
     _PALETTE = {
-        "primary": ((0.98, 0.74, 0.08, 1), (0.25, 0.16, 0.0, 1)),
-        "soft": ((0.94, 0.94, 0.93, 1), (0.20, 0.21, 0.24, 1)),
+        "primary": ((0.33, 0.30, 0.92, 1), (1, 1, 1, 1)),
+        "soft": ((0.91, 0.93, 1.0, 1), (0.20, 0.27, 0.70, 1)),
         "danger": ((1.0, 0.90, 0.91, 1), (0.78, 0.18, 0.22, 1)),
-        "ghost": ((0, 0, 0, 0), (0.45, 0.47, 0.52, 1)),
+        "ghost": ((0, 0, 0, 0), (0.42, 0.46, 0.58, 1)),
     }
 
     def __init__(self, **kw):
@@ -1032,7 +1163,7 @@ class RoundButton(ButtonBehavior, Label):
     def _recalc(self, *_):
         bg, fg = self._PALETTE.get(self.kind, self._PALETTE["primary"])
         if self.disabled:
-            bg, fg = (0.93, 0.93, 0.92, 1), (0.66, 0.68, 0.71, 1)
+            bg, fg = (0.92, 0.93, 0.96, 1), (0.62, 0.66, 0.76, 1)
         elif self.state == "down":
             bg = (bg[0] * 0.86, bg[1] * 0.86, bg[2] * 0.86, bg[3])
         self.bg_color = list(bg)
@@ -1051,7 +1182,7 @@ class SoftBar(Widget):
 class StatBox(BoxLayout):
     value = StringProperty("0")
     caption = StringProperty("")
-    accent = ListProperty([0.80, 0.55, 0.0, 1])
+    accent = ListProperty([0.30, 0.32, 0.90, 1])
 
 
 class IpRow(BoxLayout):
@@ -1076,7 +1207,7 @@ class ToastLabel(Label):
 
 class GradientBox(BoxLayout):
     c1 = ListProperty(C_PRIMARY)
-    c2 = ListProperty([1.0, 0.86, 0.30, 1])
+    c2 = ListProperty([0.25, 0.60, 0.98, 1])
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -1136,16 +1267,16 @@ class Radar(FloatLayout):
         c.clear()
         rad = math.radians
         with c:
-            Color(0.97, 0.97, 0.96, 1)
+            Color(0.94, 0.95, 1.0, 1)
             RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(24)])
             cx, cy = self.center
             R = min(self.width, self.height) / 2 - dp(34)
-            Color(0.98, 0.76, 0.10, 0.14)
+            Color(0.33, 0.30, 0.92, 0.10)
             Ellipse(pos=(cx - R, cy - R), size=(2 * R, 2 * R))
-            Color(0.85, 0.60, 0.05, 0.38)
+            Color(0.33, 0.40, 0.92, 0.38)
             for k in (1.0, 0.75, 0.5, 0.25):
                 Line(circle=(cx, cy, R * k), width=dp(0.9))
-            Color(0.85, 0.60, 0.05, 0.22)
+            Color(0.33, 0.40, 0.92, 0.22)
             Line(points=[cx - R, cy, cx + R, cy], width=dp(0.8))
             Line(points=[cx, cy - R, cx, cy + R], width=dp(0.8))
             # sweep with fading trail
@@ -1153,11 +1284,11 @@ class Radar(FloatLayout):
             for i in range(steps):
                 a0 = rad(self._angle + i * span / steps)
                 a1 = rad(self._angle + (i + 1) * span / steps)
-                Color(0.98, 0.74, 0.08, (0.40 if self.active else 0.24) * (1 - i / steps) ** 1.7)
+                Color(0.33, 0.34, 0.95, (0.40 if self.active else 0.24) * (1 - i / steps) ** 1.7)
                 Triangle(points=[cx, cy, cx + R * math.cos(a0), cy + R * math.sin(a0),
                                  cx + R * math.cos(a1), cy + R * math.sin(a1)])
             a = rad(self._angle)
-            Color(0.80, 0.55, 0.0, 0.95)
+            Color(0.25, 0.30, 0.88, 0.95)
             Line(points=[cx, cy, cx + R * math.cos(a), cy + R * math.sin(a)], width=dp(1.6))
             # blips
             oks = [b for b in self._blips if b["ok"]]
@@ -1177,7 +1308,7 @@ class Radar(FloatLayout):
                     fade = max(0.0, 1 - b["age"] / 1.6)
                     Color(0.85, 0.25, 0.30, 0.55 * fade)
                     Ellipse(pos=(x - dp(2.2), y - dp(2.2)), size=(dp(4.4), dp(4.4)))
-            Color(0.80, 0.55, 0.0, 1)
+            Color(0.25, 0.30, 0.88, 1)
             Ellipse(pos=(cx - dp(3), cy - dp(3)), size=(dp(6), dp(6)))
 
 
@@ -1209,12 +1340,12 @@ class Ring(FloatLayout):
             Color(0.10, 0.10, 0.12, 0.07)
             Line(circle=(cx, cy, r), width=w)
             if self.busy and self.value <= 0.01:
-                Color(0.98, 0.76, 0.10, 0.25)
+                Color(0.33, 0.30, 0.92, 0.22)
                 Line(circle=(cx, cy, r, self._rot, self._rot + 100), width=w * 2.2, cap="round")
                 Color(*C_CYAN)
                 Line(circle=(cx, cy, r, self._rot, self._rot + 100), width=w, cap="round")
             elif self.value > 0.005:
-                Color(0.98, 0.76, 0.10, 0.25)
+                Color(0.33, 0.30, 0.92, 0.22)
                 Line(circle=(cx, cy, r, 0, 360 * min(1.0, self.value)), width=w * 2.2, cap="round")
                 Color(*C_CYAN)
                 Line(circle=(cx, cy, r, 0, 360 * min(1.0, self.value)), width=w, cap="round")
@@ -1227,12 +1358,12 @@ class Splash(FloatLayout):
         super().__init__(**kw)
         self._t = 0.0
         self._tex = gradient_texture(C_PRIMARY, C_CYAN, vertical=True)
-        self._logo = Label(text="A", bold=True, font_size="46sp", color=(0.12, 0.13, 0.15, 1), size_hint=(None, None),
+        self._logo = Label(text="A", bold=True, font_size="46sp", color=(1, 1, 1, 1), size_hint=(None, None),
                            size=(dp(96), dp(96)), pos_hint={"center_x": .5, "center_y": .58})
         self._word = "Aminium"
-        self._name = Label(text="", bold=True, font_size="40sp", color=(0.12, 0.13, 0.15, 1), size_hint=(None, None),
+        self._name = Label(text="", bold=True, font_size="40sp", color=(1, 1, 1, 1), size_hint=(None, None),
                            size=(dp(320), dp(56)), pos_hint={"center_x": .5, "center_y": .43})
-        self._tag = Label(text="Telegram id : illuyj", font_size="15sp", color=(0.12, 0.13, 0.15, 1), opacity=0,
+        self._tag = Label(text="Telegram id : illuyj", font_size="15sp", color=(1, 1, 1, 0.9), opacity=0,
                           size_hint=(None, None), size=(dp(320), dp(30)), pos_hint={"center_x": .5, "center_y": .37})
         for w in (self._logo, self._name, self._tag):
             self.add_widget(w)
@@ -1307,6 +1438,19 @@ class ManageScreen(Screen):
     pass
 
 
+class ConnectScreen(Screen):
+    pass
+
+
+class CfgRow(ButtonBehavior, BoxLayout):
+    name = StringProperty("")
+    meta = StringProperty("")
+    ping_text = StringProperty("--")
+    ping_kind = NumericProperty(0)          # 0 untested | 1 fast | 2 ok | 3 slow / failed
+    sel = BooleanProperty(False)
+    index = NumericProperty(0)
+
+
 # ───────────────────────────── the app ─────────────────────────────
 class AminiumApp(App):
     title = "Aminium Studio"
@@ -1338,6 +1482,7 @@ class AminiumApp(App):
         self.log_lines = []
         self._shown_found = -1
         self.deployments = core.load_deployments()
+        self.vpn_init()
 
         root = Builder.load_string(KV)
         self.root_widget = root
@@ -1346,7 +1491,7 @@ class AminiumApp(App):
         self.sm.bind(current=lambda _sm, name: self._animate_in(name))
         self.logbar = root.ids.logbar
         self.hdr_sub = root.ids.hdr_sub
-        for scr in (TokenScreen(), ScanScreen(), BuildScreen(), OutputScreen(), ManageScreen()):
+        for scr in (TokenScreen(), ScanScreen(), BuildScreen(), OutputScreen(), ConnectScreen(), ManageScreen()):
             self.sm.add_widget(scr)
 
         self.tabs = {}
@@ -1462,6 +1607,8 @@ class AminiumApp(App):
         self.hdr_sub.text = next(t[2] for t in TABS if t[0] == name)
         if name == "manage":
             self.refresh_manage_list()
+        if name == "connect":
+            self.refresh_vpn_list()
         if name == "build":
             self.refresh_build_summary()
 
@@ -1849,6 +1996,333 @@ class AminiumApp(App):
                 Clock.schedule_once(lambda dt: reset_button("Something went wrong - tap the log bar for details."), 0)
         threading.Thread(target=work, daemon=True).start()
 
+    # ---------- real connection (VPN tab) ----------
+    def vpn_path(self):
+        return core.APP_DIR / "aminium_connect.json"
+
+    def vpn_init(self):
+        self.vpn_items = vpn_core.load_items(self.vpn_path())
+        self.vpn_selected = vpn_core.load_selected(self.vpn_path())
+        self.proxy = vpn_core.LocalProxy()
+        self.vpn_active_link = ""
+        self.vpn_connecting = False
+        self._vpn_rows = {}
+        self._vpn_busy = False
+        self._vpn_stop_ping = False
+        Clock.schedule_interval(lambda dt: self.vpn_tick(), 1.0)
+
+    def vpn_save(self):
+        vpn_core.save_items(self.vpn_path(), self.vpn_items, self.vpn_selected)
+
+    def vpn_item(self, link):
+        return next((it for it in self.vpn_items if it["link"] == link), None)
+
+    def vpn_import_links(self, links, silent=False):
+        self.vpn_items, added, bad = vpn_core.merge_links(self.vpn_items, list(links))
+        self.vpn_save()
+        if self.sm.current == "connect":
+            self.refresh_vpn_list()
+        if not silent:
+            self.toast(f"{added} new config(s) added" + (f"  -  {bad} unsupported skipped" if bad else ""))
+        return added
+
+    def vpn_send_built(self):
+        if not (self.out and self.out.get("links")):
+            self.toast("No configs yet")
+            return
+        n = self.vpn_import_links(self.out["links"], silent=True)
+        self.toast(f"{n} new config(s) sent to the VPN tab" if n else "They are already in the VPN tab")
+        self.goto("connect")
+
+    def vpn_paste(self):
+        from kivy.core.clipboard import Clipboard
+        txt = (Clipboard.paste() or "").strip()
+        if not txt:
+            self.toast("Clipboard is empty")
+            return
+        if re.match(r"^https?://\S+$", txt):                     # a subscription link
+            self.toast("Downloading the subscription ...")
+
+            def work():
+                try:
+                    import requests
+                    raw = requests.get(txt, headers={"User-Agent": "AminiumStudio"}, timeout=25).text.strip()
+                    links = core.links_from_base64(raw)
+                except Exception as e:
+                    Clock.schedule_once(lambda dt: self.toast(f"Could not download: {e}"), 0)
+                    return
+                Clock.schedule_once(lambda dt: self.vpn_import_links(links), 0)
+            threading.Thread(target=work, daemon=True).start()
+            return
+        links = re.findall(r"(?:vless|trojan|vmess|ss)://[^\s]+", txt)
+        if not links:
+            links = core.links_from_base64(txt)
+        if not links:
+            self.toast("No vless:// or trojan:// links found in the clipboard")
+            return
+        self.vpn_import_links(links)
+
+    # --- list ---
+    def _vpn_apply_ping(self, row, ms):
+        if ms is None:
+            row.ping_text, row.ping_kind = "--", 0
+        elif ms == -3:
+            row.ping_text, row.ping_kind = "...", 0
+        elif ms < 0:
+            row.ping_text, row.ping_kind = "fail", 3
+        else:
+            row.ping_text = f"{ms} ms"
+            row.ping_kind = 1 if ms < 400 else (2 if ms < 1000 else 3)
+
+    def refresh_vpn_list(self):
+        scr = self.sm.get_screen("connect")
+        box = scr.ids.cfg_list
+        box.clear_widgets()
+        self._vpn_rows = {}
+        if not self.vpn_items:
+            box.add_widget(Card_empty("No configs yet - build some, or tap Paste links."))
+        for i, it in enumerate(self.vpn_items[:300]):
+            row = CfgRow(index=i, name=it["name"], meta=f"{it['proto']}  -  {it['addr']}:{it['port']}",
+                         sel=(it["link"] in (self.vpn_active_link, self.vpn_selected)))
+            self._vpn_apply_ping(row, it.get("ping"))
+            row.bind(on_release=lambda r: self.vpn_row_menu(r.index))
+            self._vpn_rows[it["link"]] = row
+            box.add_widget(row)
+        self.vpn_update_ui()
+
+    def vpn_sort(self):
+        def key(it):
+            p = it.get("ping")
+            return (1, 0) if p is None or p < 0 else (0, p)
+        self.vpn_items.sort(key=key)
+        self.vpn_save()
+        self.refresh_vpn_list()
+        self.toast("Sorted - fastest first")
+
+    # --- ping ---
+    def _vpn_got_ping(self, link, ms):
+        it = self.vpn_item(link)
+        if it is None:
+            return
+        it["ping"] = ms
+        row = self._vpn_rows.get(link)
+        if row is not None:
+            self._vpn_apply_ping(row, ms)
+
+    def _vpn_ping_done(self):
+        self._vpn_busy = False
+        self.vpn_save()
+        try:
+            self.sm.get_screen("connect").ids.btn_ping_all.text = "Ping all"
+        except Exception:
+            pass
+        ok = sum(1 for it in self.vpn_items if (it.get("ping") or -1) >= 0)
+        self.toast(f"Ping finished  -  {ok} of {len(self.vpn_items)} answered")
+
+    def vpn_ping_all(self):
+        scr = self.sm.get_screen("connect")
+        if self._vpn_busy:
+            self._vpn_stop_ping = True
+            self.toast("Stopping ...")
+            return
+        if not self.vpn_items:
+            self.toast("Nothing to ping yet")
+            return
+        mode = scr.ids.sp_ping_mode.text
+        items = [dict(it) for it in self.vpn_items]
+        self._vpn_busy, self._vpn_stop_ping = True, False
+        scr.ids.btn_ping_all.text = "Stop"
+        for row in self._vpn_rows.values():
+            self._vpn_apply_ping(row, -3)
+
+        def on_result(i, ms):
+            link = items[i]["link"]
+            Clock.schedule_once(lambda dt: self._vpn_got_ping(link, ms), 0)
+
+        def work():
+            try:
+                vpn_core.ping_many(items, mode, on_result, should_stop=lambda: self._vpn_stop_ping)
+            finally:
+                Clock.schedule_once(lambda dt: self._vpn_ping_done(), 0)
+        threading.Thread(target=work, daemon=True).start()
+
+    def vpn_ping_one(self, link):
+        cfg = vpn_core.parse_link(link)
+        if not cfg:
+            return
+        mode = self.sm.get_screen("connect").ids.sp_ping_mode.text
+        row = self._vpn_rows.get(link)
+        if row is not None:
+            self._vpn_apply_ping(row, -3)
+
+        def work():
+            ms = vpn_core.ping(cfg, mode)
+            Clock.schedule_once(lambda dt: (self._vpn_got_ping(link, ms), self.vpn_save()), 0)
+        threading.Thread(target=work, daemon=True).start()
+
+    # --- connect / disconnect ---
+    def vpn_toggle(self):
+        if self.vpn_active_link or self.vpn_connecting:
+            self.vpn_disconnect()
+            return
+        if not self.vpn_items:
+            self.toast("Add configs first (they arrive automatically after a build)")
+            return
+        link = self.vpn_selected if self.vpn_item(self.vpn_selected) else ""
+        if not link:                                            # no choice yet -> the fastest known, else the first
+            good = [it for it in self.vpn_items if (it.get("ping") or -1) >= 0]
+            link = (min(good, key=lambda x: x["ping"]) if good else self.vpn_items[0])["link"]
+        self.vpn_connect(link)
+
+    def vpn_connect(self, link):
+        cfg = vpn_core.parse_link(link)
+        if not cfg:
+            self.toast("This config type is not supported")
+            return
+        if self.vpn_active_link:
+            self.proxy.stop()
+            self.vpn_active_link = ""
+        self.vpn_connecting = True
+        self.vpn_selected = link
+        self.vpn_save()
+        self.vpn_update_ui(status=f"Connecting to {cfg['name']} ...")
+
+        def work():
+            ok = self.proxy.start(cfg)
+            ms = vpn_core.ping(cfg, "Real delay", 10) if ok else -1
+
+            def done(dt):
+                self.vpn_connecting = False
+                if not ok:
+                    self.vpn_update_ui(status=f"Could not start the local proxy: {self.proxy.error}", err=True)
+                elif ms < 0:
+                    self.proxy.stop()
+                    self.vpn_update_ui(status="This config did not answer through the tunnel", err=True)
+                    self._vpn_got_ping(link, -1)
+                    self.vpn_save()
+                else:
+                    self.vpn_active_link = link
+                    self._vpn_got_ping(link, ms)
+                    self.vpn_save()
+                    self.toast(f"Connected  -  {ms} ms")
+                self.refresh_vpn_list()
+            Clock.schedule_once(done, 0)
+        threading.Thread(target=work, daemon=True).start()
+
+    def vpn_disconnect(self):
+        self.proxy.stop()
+        self.vpn_active_link = ""
+        self.vpn_connecting = False
+        self.refresh_vpn_list()
+        self.toast("Disconnected")
+
+    def vpn_update_ui(self, status=None, err=False):
+        try:
+            scr = self.sm.get_screen("connect")
+        except Exception:
+            return
+        ids = scr.ids
+        it = self.vpn_item(self.vpn_active_link)
+        if status:
+            ids.lbl_vpn_state.text = status
+            ids.lbl_vpn_state.color = C_ERR if err else C_MUTED
+        elif it:
+            ids.lbl_vpn_state.text = f"Connected  -  {it['name']}"
+            ids.lbl_vpn_state.color = C_OK
+        else:
+            ids.lbl_vpn_state.text = "Disconnected"
+            ids.lbl_vpn_state.color = C_MUTED
+        if it:
+            ids.lbl_vpn_info.text = (f"Local proxy running on 127.0.0.1:{self.proxy.port} (SOCKS5 and HTTP). Put it in an app's proxy "
+                                     "settings (Telegram, a browser ...). For the whole phone use  Open in VPN app  on a config.")
+        else:
+            ids.lbl_vpn_info.text = "Tap a config for its menu, or press Connect to use the selected / fastest one."
+        ids.btn_vpn_toggle.text = "Disconnect" if (it or self.vpn_connecting) else "Connect"
+        ids.btn_vpn_toggle.kind = "danger" if (it or self.vpn_connecting) else "primary"
+        if not it:
+            ids.lbl_vpn_stats.text = ""
+
+    def vpn_tick(self):
+        if not self.vpn_active_link:
+            return
+        if self.proxy.state != "running":
+            self.vpn_active_link = ""
+            self.refresh_vpn_list()
+            self.toast("The connection stopped")
+            return
+        st = self.proxy.stats
+        try:
+            self.sm.get_screen("connect").ids.lbl_vpn_stats.text = (
+                f"Up {vpn_core.fmt_bytes(st['up'])}   Down {vpn_core.fmt_bytes(st['down'])}   "
+                f"{st['active']} open   {st['conns']} total")
+        except Exception:
+            pass
+
+    # --- per-config menu ---
+    def vpn_row_menu(self, index):
+        if not (0 <= index < len(self.vpn_items)):
+            return
+        it = self.vpn_items[index]
+        link = it["link"]
+        content = BoxLayout(orientation="vertical", padding=dp(8), spacing=dp(8))
+        pop = self.make_popup(it["name"][:34], content, (0.9, 0.66))
+
+        def act(fn):
+            def go(*_):
+                pop.dismiss()
+                fn()
+            return go
+        active = (link == self.vpn_active_link)
+        entries = [
+            ("Disconnect" if active else "Connect", "danger" if active else "primary",
+             self.vpn_disconnect if active else (lambda: self.vpn_connect(link))),
+            ("Ping this config", "soft", lambda: self.vpn_ping_one(link)),
+            ("Open in VPN app (v2rayNG, NPV ...)", "soft", lambda: self.vpn_open_in_app(link)),
+            ("Copy link", "soft", lambda: self.vpn_copy(link)),
+            ("Delete", "danger", lambda: self.vpn_delete(link)),
+        ]
+        for text, kind, fn in entries:
+            b = RoundButton(text=text, kind=kind, height=dp(46))
+            b.bind(on_release=act(fn))
+            content.add_widget(b)
+        pop.open()
+
+    def vpn_copy(self, link):
+        from kivy.core.clipboard import Clipboard
+        Clipboard.copy(link)
+        self.toast("Link copied")
+
+    def vpn_delete(self, link):
+        if link == self.vpn_active_link:
+            self.vpn_disconnect()
+        self.vpn_items = [it for it in self.vpn_items if it["link"] != link]
+        if self.vpn_selected == link:
+            self.vpn_selected = ""
+        self.vpn_save()
+        self.refresh_vpn_list()
+
+    def vpn_open_in_app(self, link):
+        """hand the link to a VPN app that can route the whole phone (v2rayNG, NPV Tunnel, Hiddify ...)"""
+        from kivy.core.clipboard import Clipboard
+        Clipboard.copy(link)
+        if platform != "android":
+            self.toast("Link copied")
+            return
+        try:
+            from jnius import autoclass, cast  # type: ignore
+            Intent = autoclass("android.content.Intent")
+            JString = autoclass("java.lang.String")
+            Activity = autoclass("org.kivy.android.PythonActivity")
+            i = Intent()
+            i.setAction(Intent.ACTION_SEND)
+            i.setType("text/plain")
+            i.putExtra(Intent.EXTRA_TEXT, link)
+            chooser = Intent.createChooser(i, cast("java.lang.CharSequence", JString("Open with")))
+            Activity.mActivity.startActivity(chooser)
+            self.toast("Link copied  -  choose your VPN app")
+        except Exception as e:
+            self.toast(f"Link copied. Paste it in your VPN app ({e})")
+
     # ---------- step 4: configs ----------
     def render_output(self):
         o = self.sm.get_screen("output")
@@ -1859,6 +2333,11 @@ class AminiumApp(App):
         o.ids.lbl_out_info.text = (f"{n} configs  -  {len(self.rec.get('ips', []))} clean IPs\n"
                                    f"Panel:  {self.rec['base']}{self.rec['panel_path']}\nPassword:  {self.rec['password']}")
         self.on_pick_fmt(o.ids.sp_fmt.text)
+        if self.out and self.out.get("links") and id(self.out) != getattr(self, "_vpn_last_out", None):
+            self._vpn_last_out = id(self.out)
+            n = self.vpn_import_links(self.out["links"], silent=True)
+            if n:
+                self.toast(f"{n} configs saved to the VPN tab")
 
     def on_pick_fmt(self, label):
         if not getattr(self, "_ready", False):
@@ -2186,9 +2665,9 @@ class AminiumApp(App):
         popup.open()
 
 
-def Card_empty():
+def Card_empty(text="No configs built yet."):
     c = Card()
-    lab = Label(text="No configs built yet.", color=C_MUTED, size_hint_y=None, height=dp(40))
+    lab = Label(text=text, color=C_MUTED, size_hint_y=None, height=dp(40))
     c.add_widget(lab)
     return c
 
