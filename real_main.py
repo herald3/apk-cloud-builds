@@ -1681,7 +1681,7 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.clipboard import Clipboard
 from kivy.core.window import Window
-from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
+from kivy.graphics import Color, Ellipse, InstructionGroup, Line, Rectangle, RoundedRectangle
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
 from kivy.properties import NumericProperty, StringProperty
@@ -1725,7 +1725,7 @@ DEPTH = {  # how hard to look for IPs  ->  more IPs = more configs (configs = IP
 }
 PANEL_STYLE = {"ports": TLS_PORTS, "portsHttp": PLAIN_PORTS, "protocols": {"vless": True, "trojan": True}, "maxLinks": 0}
 PER_PAGE = 40          # raw links shown per page (the list can hold thousands)
-MAX_ROWS = 100         # best scan results drawn on screen
+MAX_ROWS = 40          # best scan results drawn on screen (after the scan ends)
 
 
 def _rgb(h):
@@ -2304,9 +2304,7 @@ class StepItem(FloatLayout):
             self.anim = None
         self.pulse = 0.0
         if self.idx == cur:
-            self.anim = Animation(pulse=1.0, d=0.9, t="in_out_sine") + Animation(pulse=0.0, d=0.9, t="in_out_sine")
-            self.anim.repeat = True
-            self.anim.start(self)
+            self.pulse = 0.4              # static soft ring (no endless animation = no wasted CPU)
         self.draw()
 
     def draw(self, *_):
@@ -2384,90 +2382,101 @@ class Stepper(BoxLayout):
 
 
 class Disc(FloatLayout):
-    """A tilted radar slab. Every clean IP becomes a glowing pillar standing on the disc (height = score)."""
+    """A tilted radar slab. Every clean IP becomes a pillar standing on the disc (height = score).
+    The slab is drawn once per size change; only the sweep and the pillars are redrawn (10 times a second)."""
     caption = StringProperty("")
 
     def __init__(self, **kw):
         kw.setdefault("size_hint_y", None)
-        kw.setdefault("height", dp(210))
+        kw.setdefault("height", dp(190))
         super().__init__(**kw)
         self.mode, self.angle, self.blips = "idle", 0.0, []
+        self._geo = None
+        self._static, self._dyn = InstructionGroup(), InstructionGroup()
+        self.canvas.before.add(self._static)
+        self.canvas.before.add(self._dyn)
         self.cap = Label(text="", font_size=sp(12), color=C(SUB), size_hint=(1, None), height=dp(20))
         self.add_widget(self.cap)
-        self.bind(pos=self.draw, size=self.draw)
-        Clock.schedule_interval(self.tick, 0.05)
-        self.draw()
+        self.bind(pos=self.layout_static, size=self.layout_static)
+        Clock.schedule_interval(self.tick, 0.1)
+        self.layout_static()
 
     def on_caption(self, _w, v):
         self.cap.text = v
 
     def set_blips(self, rows):
+        best = sorted(rows, key=lambda r: -r[1])[:80]
         out = []
-        for ip, score in rows[:400]:
+        for ip, score in best:
             h = int(hashlib.md5(ip.encode()).hexdigest()[:8], 16)
             out.append((h % 360, 0.22 + ((h // 360) % 72) / 100.0, score))
         out.sort(key=lambda b: math.sin(math.radians(b[0])) * b[1])     # back to front, once
         self.blips = out
 
-    def draw(self, *_):
+    def layout_static(self, *_):
         try:
-            self._draw()
+            w, h = self.size
+            if w < dp(40) or h < dp(40):
+                return
+            self.cap.pos = (self.x, self.y + dp(2))
+            s = min(w * 0.44 / 168.0, (h - dp(28)) / 190.0)
+            rx, ry = 168.0 * s, 64.0 * s
+            cx = self.x + w / 2.0
+            cy = self.y + dp(24) + 12.0 * s + ry
+            self._geo = (cx, cy, rx, ry, s)
+            g = self._static
+            g.clear()
+            for d in range(12, 0, -3):                                   # slab thickness
+                g.add(Color(*C(lerp(EDGE, SHADOW, d / 12.0))))
+                g.add(Ellipse(pos=(cx - rx, cy - ry - d * s), size=(2 * rx, 2 * ry)))
+            g.add(Color(*C("#0b1230")))
+            g.add(Ellipse(pos=(cx - rx, cy - ry), size=(2 * rx, 2 * ry)))
+            for k in range(5):                                           # soft glow
+                f = 0.95 - k * 0.17
+                g.add(Color(*C(lerp("#0b1230", "#18265a", k / 5.0))))
+                g.add(Ellipse(pos=(cx - rx * f, cy - ry * f), size=(2 * rx * f, 2 * ry * f)))
+            g.add(Color(*C(ACC, 0.9)))
+            g.add(Line(ellipse=(cx - rx, cy - ry, 2 * rx, 2 * ry), width=dp(1.3)))
+            g.add(Color(*C("#26336f")))
+            for f in (0.66, 0.33):
+                g.add(Line(ellipse=(cx - rx * f, cy - ry * f, 2 * rx * f, 2 * ry * f), width=1.0))
+            self.draw_dyn()
         except Exception:  # pragma: no cover  (a visual must never crash the app)
             pass
 
-    def _draw(self):
-        w, h = self.size
-        if w < dp(40) or h < dp(40):
-            return
-        self.cap.pos = (self.x, self.y + dp(2))
-        s = min(w * 0.46 / 168.0, (h - dp(28)) / 190.0)
-        rx, ry = 168.0 * s, 64.0 * s
-        cx = self.x + w / 2.0
-        cy = self.y + dp(24) + 12.0 * s + ry
-        cv = self.canvas.before
-        cv.clear()
+    def draw(self, *_):
+        if self._geo is None:
+            self.layout_static()
+        else:
+            self.draw_dyn()
 
-        def pt(ang, frac):
-            a = math.radians(ang)
-            return cx + math.cos(a) * rx * frac, cy - math.sin(a) * ry * frac
-        with cv:
-            for d in range(12, 0, -1):                                   # slab thickness
-                Color(*C(lerp(EDGE, SHADOW, d / 12.0)))
-                Ellipse(pos=(cx - rx, cy - ry - d * s), size=(2 * rx, 2 * ry))
-            Color(*C("#0b1230"))
-            Ellipse(pos=(cx - rx, cy - ry), size=(2 * rx, 2 * ry))
-            Color(*C(ACC))
-            Line(ellipse=(cx - rx, cy - ry, 2 * rx, 2 * ry), width=dp(1.5))
-            for k in range(14):                                          # soft radial glow
-                f = 0.97 - k * 0.07
-                Color(*C(lerp("#0b1230", "#1a2a62", k / 14.0)))
-                Ellipse(pos=(cx - rx * f, cy - ry * f), size=(2 * rx * f, 2 * ry * f))
-            Color(*C("#26336f"))
-            for f in (0.75, 0.5, 0.25):
-                Line(ellipse=(cx - rx * f, cy - ry * f, 2 * rx * f, 2 * ry * f), width=1.0)
-            Color(*C("#1d2858"))
-            Line(points=[cx - rx, cy, cx + rx, cy], width=1.0)
-            Line(points=[cx, cy - ry, cx, cy + ry], width=1.0)
-            if self.mode != "idle":                                      # fading sweep
+    def draw_dyn(self):
+        try:
+            if self._geo is None:
+                return
+            cx, cy, rx, ry, s = self._geo
+            g = self._dyn
+            g.clear()
+            if self.mode != "idle":                                      # short fading sweep
                 head = ACC2 if self.mode == "build" else ACC
-                for i in range(16):
-                    start = (self.angle - (i + 1) * 3.5 + 90.0) % 360.0
-                    Color(*C(lerp(head, "#0b1230", i / 16.0)))
-                    Ellipse(pos=(cx - rx, cy - ry), size=(2 * rx, 2 * ry), angle_start=start, angle_end=start + 3.6)
+                for i in range(6):
+                    start = (self.angle - (i + 1) * 5.0 + 90.0) % 360.0
+                    g.add(Color(*C(lerp(head, "#0b1230", i / 6.0))))
+                    g.add(Ellipse(pos=(cx - rx, cy - ry), size=(2 * rx, 2 * ry), angle_start=start, angle_end=start + 5.2))
             for ang, fr, score in self.blips:
-                x, y = pt(ang, fr)
-                hgt = (8 + max(0, min(100, score)) * 0.42) * s
-                Color(*C("#0d3a2a"))
-                Ellipse(pos=(x - 4 * s, y - 2 * s), size=(8 * s, 4 * s))
-                Color(*C(GOOD))
-                Line(points=[x, y, x, y + hgt], width=dp(1.3))
-                Color(*C("#b8ffe0"))
-                Ellipse(pos=(x - 3 * s, y + hgt - 3 * s), size=(6 * s, 6 * s))
+                a = math.radians(ang)
+                x, y = cx + math.cos(a) * rx * fr, cy - math.sin(a) * ry * fr
+                hgt = (8 + max(0, min(100, score)) * 0.4) * s
+                g.add(Color(*C(GOOD)))
+                g.add(Line(points=[x, y, x, y + hgt], width=dp(1.2)))
+                g.add(Ellipse(pos=(x - 2.6 * s, y + hgt - 2.6 * s), size=(5.2 * s, 5.2 * s)))
+        except Exception:  # pragma: no cover
+            pass
 
     def tick(self, _dt):
         if self.mode != "idle":
-            self.angle = (self.angle + (9 if self.mode == "build" else 6)) % 360
-            self.draw()
+            self.angle = (self.angle + (18 if self.mode == "build" else 12)) % 360
+            self.draw_dyn()
 
 
 class QRView(Widget):
@@ -2517,25 +2526,29 @@ class QRView(Widget):
                 Rectangle(texture=self.tex, pos=(self.x + (self.width - qs) / 2.0, self.y + (self.height - qs) / 2.0), size=(qs, qs))
 
 
-class ResRow(Panel):
-    """One scan result (two lines, colour = score level)."""
+class ResRow(Label):
+    """One scan result: a single light label (two lines, colour = score level)."""
 
     def __init__(self, r, n, **kw):
         lv = "hi" if r["score"] >= 70 else ("mid" if r["score"] >= 40 else "lo")
         ipc = {"hi": "#c9ffe6", "mid": TXT, "lo": "#e0b872"}[lv]
         scc = {"hi": GOOD, "mid": ACC, "lo": WARN}[lv]
         sp_ = "-" if r["speed"] is None else r["speed"]
-        super().__init__(bg=CARD if n % 2 == 0 else "#0f1631", radius=10, size_hint_y=None, height=dp(56),
-                         padding=[dp(12), dp(5)], **kw)
-        top = ("[b][color=%s]%s[/color][/b]   [color=%s]%s[/color]   [b][color=%s]score %s[/color][/b]"
-               % (ipc, escape_markup(str(r["ip"])), SUB, escape_markup(str(r["colo"])), scc, r["score"]))
-        low = ("[color=%s]total %s ms  \u2022  tcp %s  tls %s  ttfb %s  \u2022  jitter %s  loss %s%%  \u2022  %s Mbps[/color]"
-               % (SUB, r["total"], r["tcp"], r["tls"], r["ttfb"], r["jitter"], r["loss"], sp_))
-        for t, size in ((top, 14), (low, 10)):
-            lb = Label(text=t, markup=True, font_size=sp(size), halign="left", valign="middle", shorten=True,
-                       shorten_from="right")
-            lb.bind(size=lambda w, _: setattr(w, "text_size", (w.width, w.height)))
-            self.add_widget(lb)
+        txt = ("[b][color=%s]%s[/color][/b]   [color=%s]%s[/color]   [b][color=%s]score %s[/color][/b]\n"
+               "[size=11sp][color=%s]%s ms  \u2022  tcp %s  tls %s  ttfb %s  \u2022  loss %s%%  \u2022  %s Mbps[/color][/size]"
+               % (ipc, escape_markup(str(r["ip"])), SUB, escape_markup(str(r["colo"])), scc, r["score"],
+                  SUB, r["total"], r["tcp"], r["tls"], r["ttfb"], r["loss"], sp_))
+        super().__init__(text=txt, markup=True, font_size=sp(14), halign="left", valign="middle", shorten=True,
+                         shorten_from="right", size_hint_y=None, height=dp(52), padding_x=dp(12), **kw)
+        with self.canvas.before:
+            Color(*C(CARD2 if n % 2 == 0 else "#0f1631"))
+            self._r = RoundedRectangle(radius=[dp(10)])
+        self.bind(pos=self._upd, size=self._upd)
+        self._upd()
+
+    def _upd(self, *_):
+        self._r.pos, self._r.size = self.pos, self.size
+        self.text_size = (self.width, self.height)
 
 
 class LinkRow(ButtonBehavior, Label):
@@ -2693,16 +2706,31 @@ class Wizard(BoxLayout):
 
     def log(self, msg):
         line = time.strftime("[%H:%M:%S] ") + str(msg)
-
-        def _do(_dt=None):
+        with self._log_lock:
             self._log_lines.append(line)
+            if str(msg).startswith("ERROR"):
+                self._log_err = True
+            need = not self._log_pending
+            self._log_pending = True
+        if need:
+            Clock.schedule_once(self._flush_log, 0.4)       # batch: many lines per second cost one redraw
+
+    def _flush_log(self, _dt=None):
+        with self._log_lock:
+            self._log_pending = False
             if len(self._log_lines) > 400:
-                del self._log_lines[:100]
-            self.logbox.ti.text = "\n".join(self._log_lines)
-            self.logbox.to_end()
-            if str(msg).startswith("ERROR") and not self.log_open:
-                self.toggle_log()
-        Clock.schedule_once(_do, 0)
+                del self._log_lines[:len(self._log_lines) - 300]
+            err, self._log_err = self._log_err, False
+        if self.log_open:
+            self._render_log()
+        elif err:
+            self.toggle_log()
+
+    def _render_log(self):
+        with self._log_lock:
+            text = "\n".join(self._log_lines[-150:])
+        self.logbox.ti.text = text
+        self.logbox.to_end()
 
     def stage(self, text, frac=None):
         def _do():
@@ -2739,6 +2767,7 @@ class Wizard(BoxLayout):
         self.log_open = not self.log_open
         if self.log_open:
             set_children(self.log_slot, self.logbox)
+            self._render_log()
             self.btn_log.configure(text="Hide log")
         else:
             self.log_slot.clear_widgets()
@@ -2772,6 +2801,9 @@ class Wizard(BoxLayout):
             self._bgr = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=lambda *_: setattr(self._bgr, "pos", self.pos), size=lambda *_: setattr(self._bgr, "size", self.size))
         self._log_lines: list = []
+        self._log_lock = threading.Lock()
+        self._log_pending = False
+        self._log_err = False
         self.add_widget(Banner())
         self.stepper = Stepper(STEPS, lambda i: (not self.busy) and self.goto(i))
         self.add_widget(self.stepper)
@@ -3161,8 +3193,14 @@ class Wizard(BoxLayout):
         box = self.res_box
         box.clear_widgets()
         rows = sorted(results, key=lambda r: -r["score"])
+        scanning = bool(self.job and self.job.phase in ("diagnosing", "scanning", "speed", "finishing"))
         if not rows:
-            box.add_widget(Text("Nothing yet - the best IPs appear here while the scan runs.", color=SUB, size=12))
+            box.add_widget(Text("Nothing yet - the best IPs show up here.", color=SUB, size=12))
+            return
+        if scanning:                       # keep the screen calm and fast: 3 lines only, full list when the scan ends
+            lines = "\n".join(f"{r['ip']}   {r['colo']}   {r['total']} ms   score {r['score']}" for r in rows[:3])
+            box.add_widget(Text("Best so far:\n" + lines, color=TXT, size=12, mono=True))
+            box.add_widget(Text("The full list appears when the scan finishes.", color=SUB, size=11))
             return
         for n, r in enumerate(rows[:MAX_ROWS]):
             box.add_widget(ResRow(r, n))
