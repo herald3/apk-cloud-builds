@@ -2577,6 +2577,120 @@ class LinkRow(ButtonBehavior, Label):
         self.cmd(self.link)
 
 
+class PowerButton(ButtonBehavior, Widget):
+    """Big round connect button (power symbol)."""
+
+    def __init__(self, cmd=None, **kw):
+        kw.setdefault("size_hint", (None, None))
+        kw.setdefault("size", (dp(132), dp(132)))
+        super().__init__(**kw)
+        self.cmd, self.on = cmd, False
+        self.bind(pos=self.draw, size=self.draw, state=self.draw)
+
+    def set_on(self, on):
+        self.on = on
+        self.draw()
+
+    def draw(self, *_):
+        c = self.canvas
+        c.clear()
+        cx, cy = self.center
+        r = min(self.width, self.height) / 2.0
+        col = GOOD if self.on else ACC
+        with c:
+            Color(*C(col, 0.12))
+            Ellipse(pos=(cx - r, cy - r), size=(2 * r, 2 * r))
+            Color(*C(col, 0.22 if self.state == "down" else 0.0))
+            Ellipse(pos=(cx - r * 0.82, cy - r * 0.82), size=(2 * r * 0.82, 2 * r * 0.82))
+            Color(*C(CARD))
+            Ellipse(pos=(cx - r * 0.78, cy - r * 0.78), size=(2 * r * 0.78, 2 * r * 0.78))
+            Color(*C(col))
+            Line(circle=(cx, cy, r * 0.78), width=dp(2.2))
+            ri = r * 0.30
+            Line(circle=(cx, cy, ri, 55, 305), width=dp(3))        # open ring, power symbol
+            Line(points=[cx, cy + ri * 0.15, cx, cy + ri * 1.25], width=dp(3))
+
+    def on_release(self):
+        if self.cmd:
+            self.cmd()
+
+
+class CfgRow(ButtonBehavior, FloatLayout):
+    """One saved config in the VPN list."""
+
+    def __init__(self, item, cmd, selected=False, **kw):
+        kw.setdefault("size_hint_y", None)
+        super().__init__(**kw)
+        self.height = dp(62)
+        self.item_id, self.cmd, self.sel = item["id"], cmd, selected
+        self.ping = item.get("ping")
+        mk = dict(halign="left", valign="middle", shorten=True, shorten_from="right", size_hint=(None, None))
+        self.name = Label(text=str(item["name"]), bold=True, font_size=sp(14), color=C(TXT), **mk)
+        self.sub = Label(text=f"{item['addr']}:{item['port']}  \u2022  {item.get('group', '')}", font_size=sp(11), color=C(SUB), **mk)
+        self.png = Label(text="", bold=True, font_size=sp(13), halign="right", valign="middle", size_hint=(None, None))
+        for w in (self.name, self.sub, self.png):
+            self.add_widget(w)
+        self.bind(pos=self._lay, size=self._lay)
+        self.set_ping(self.ping)
+
+    def _lay(self, *_):
+        x, y = self.pos
+        w, h = self.size
+        left, right = dp(50), dp(86)
+        for lb, yy, hh in ((self.name, y + h * 0.5, dp(24)), (self.sub, y + h * 0.12, dp(22))):
+            lb.size = (max(1, w - left - right), hh)
+            lb.text_size = lb.size
+            lb.pos = (x + left, yy)
+        self.png.size = (dp(78), dp(28))
+        self.png.text_size = self.png.size
+        self.png.pos = (x + w - dp(86), y + h * 0.5 - dp(14))
+        cv = self.canvas.before
+        cv.clear()
+        with cv:
+            Color(*C("#1a2a5c" if self.sel else CARD2))
+            RoundedRectangle(pos=(x, y + dp(2)), size=(w, h - dp(4)), radius=[dp(14)])
+            if self.sel:
+                Color(*C(ACC))
+                Line(rounded_rectangle=(x, y + dp(2), w, h - dp(4), dp(14)), width=dp(1.3))
+            cx, cy = x + dp(26), y + h / 2.0
+            if self.sel:
+                Color(*C(GOOD))
+                Ellipse(pos=(cx - dp(11), cy - dp(11)), size=(dp(22), dp(22)))
+                Color(*C("#06281a"))
+                Line(points=[cx - dp(5), cy, cx - dp(1.5), cy - dp(4), cx + dp(5.5), cy + dp(4)], width=dp(1.8))
+            else:
+                Color(*C(EDGE))
+                Line(circle=(cx, cy, dp(11)), width=dp(1.4))
+
+    def set_selected(self, on):
+        self.sel = on
+        self._lay()
+
+    def set_ping(self, ms):
+        self.ping = ms
+        if ms is None:
+            self.png.text, self.png.color = "-", C(SUB)
+        elif ms < 0:
+            self.png.text, self.png.color = "timeout", C(BAD)
+        else:
+            self.png.text = f"{ms} ms"
+            self.png.color = C(GOOD if ms < 300 else (WARN if ms < 700 else BAD))
+
+    def on_release(self):
+        self.cmd(self.item_id)
+
+
+def collapse(w, on):
+    """Hide / show a fixed-height widget without removing it."""
+    if on:
+        if not hasattr(w, "_saved"):
+            w._saved = (w.size_hint_y, w.height, w.opacity, w.disabled)
+        w.size_hint_y, w.height, w.opacity, w.disabled = None, 0, 0, True
+    elif hasattr(w, "_saved"):
+        w.size_hint_y, w.height, w.opacity, w.disabled = w._saved
+        del w._saved
+
+
 def raised(parent, title=None):
     """A floating card (soft shadow + thin border). Returns the card; add content with card.add_widget(...)."""
     card = Panel(bg=CARD, radius=18, border=EDGE, shadow=True, auto=True, padding=[dp(14), dp(12), dp(14), dp(14)], spacing=dp(9))
@@ -2595,6 +2709,175 @@ def raised(parent, title=None):
         card.add_widget(hd)
     parent.add_widget(card)
     return card
+
+
+# ───────────────────────────── VPN page: config library, Patt-compatible links, Xray JSON, ping ─────────────────────────────
+PATT_CIPHERS = "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384:TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256:TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256:TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA:TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA:TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256:TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"
+PATT_MASK = [{"type": "fragment", "settings": {"packets": "tlshello", "lengths": ["0", "104", "1"], "delays": ["0"], "maxSplit": "0"}},
+             {"type": "fragment", "settings": {"packets": "1-1", "lengths": ["114", "1"], "delays": ["1"], "maxSplit": "11"}}]
+
+
+def parse_link(link: str):
+    """vless:// or trojan:// share link -> dict (None if it is something else)."""
+    m = re.match(r"^(vless|trojan)://([^@]+)@(\[[^\]]+\]|[^:/?#]+):(\d+)/?\??([^#]*)#?(.*)$", (link or "").strip())
+    if not m:
+        return None
+    proto, cred, addr, port, q, name = m.groups()
+    params = {}
+    for part in q.split("&"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            params[k] = unquote(v)
+    addr = addr.strip("[]")
+    return {"proto": proto, "id": unquote(cred), "addr": addr, "port": int(port), "params": params,
+            "name": unquote(name) or f"{addr}:{port}"}
+
+
+def build_link(p: dict) -> str:
+    q = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in p["params"].items())
+    host = f"[{p['addr']}]" if ":" in p["addr"] else p["addr"]
+    return f"{p['proto']}://{p['id']}@{host}:{p['port']}?{q}#{quote(p['name'], safe='')}"
+
+
+def patt_link(link: str) -> str:
+    """The same disguise the panel's Patt format uses: fp=unsafe, alpn=http/1.1, custom ciphers (cs) + TLS-hello fragment (fm)."""
+    p = parse_link(link)
+    if not p:
+        return link
+    p["params"].update(fp="unsafe", alpn="http/1.1", cs=PATT_CIPHERS, fm=json.dumps({"tcp": PATT_MASK}, separators=(",", ":")))
+    return build_link(p)
+
+
+def xray_json(link: str, socks_port: int = 10808) -> dict:
+    """Full Xray-core client config for one link (understands fp / alpn / cs / fm, i.e. Patt links too)."""
+    p = parse_link(link)
+    if not p:
+        raise ValueError("not a vless/trojan link")
+    pr = p["params"]
+    host = pr.get("host") or pr.get("sni") or p["addr"]
+    stream: dict = {"network": "ws", "wsSettings": {"path": pr.get("path", "/"), "headers": {"Host": host}}}
+    if pr.get("security", "tls") == "tls":
+        tls = {"serverName": pr.get("sni") or host, "fingerprint": pr.get("fp", "chrome"),
+               "alpn": [a for a in pr.get("alpn", "").split(",") if a]}
+        if pr.get("cs"):
+            tls["cipherSuites"] = pr["cs"]
+        stream["security"] = "tls"
+        stream["tlsSettings"] = tls
+    else:
+        stream["security"] = "none"
+    if pr.get("fm"):
+        try:
+            stream["finalmask"] = json.loads(pr["fm"])
+        except ValueError:
+            pass
+    if p["proto"] == "vless":
+        out = {"tag": "proxy", "protocol": "vless", "settings": {"vnext": [{"address": p["addr"], "port": p["port"],
+               "users": [{"id": p["id"], "encryption": "none"}]}]}, "streamSettings": stream}
+    else:
+        out = {"tag": "proxy", "protocol": "trojan", "settings": {"servers": [{"address": p["addr"], "port": p["port"],
+               "password": p["id"]}]}, "streamSettings": stream}
+    return {"log": {"loglevel": "warning"},
+            "inbounds": [{"tag": "socks", "listen": "127.0.0.1", "port": socks_port, "protocol": "socks",
+                          "settings": {"udp": True, "auth": "noauth"}, "sniffing": {"enabled": True, "destOverride": ["http", "tls"]}}],
+            "outbounds": [out, {"tag": "direct", "protocol": "freedom"}, {"tag": "block", "protocol": "blackhole"}],
+            "routing": {"domainStrategy": "IPIfNonMatch", "rules": [{"type": "field", "ip": ["geoip:private"], "outboundTag": "direct"}]}}
+
+
+PRIVATE_CIDRS = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "169.254.0.0/16", "fc00::/7", "fe80::/10"]
+VPN_SERVICE = "org.aminium.aminiumstudio.AminiumVpnService"
+
+
+def xray_tun_config(link: str) -> dict:
+    """Config for the built-in VPN: Xray's TUN inbound (the file descriptor comes from the Android VpnService) + the proxy."""
+    cfg = xray_json(link)
+    cfg["inbounds"] = [{"tag": "tun", "port": 0, "protocol": "tun", "settings": {"name": "xray0", "mtu": 1500, "userLevel": 0},
+                        "sniffing": {"enabled": True, "destOverride": ["http", "tls"]}}]
+    cfg["routing"] = {"domainStrategy": "AsIs", "rules": [{"type": "field", "ip": PRIVATE_CIDRS, "outboundTag": "direct"}]}
+    return cfg
+
+
+def tcp_ping(addr: str, port: int, timeout: float = 3.0):
+    """Milliseconds to open a TCP connection (None = unreachable)."""
+    try:
+        t0 = time.perf_counter()
+        sk = socket.create_connection((addr, port), timeout=timeout)
+        ms = int((time.perf_counter() - t0) * 1000)
+        sk.close()
+        return max(1, ms)
+    except OSError:
+        return None
+
+
+def real_ping(link: str, timeout: float = 6.0):
+    """Milliseconds for a real TLS + WebSocket upgrade through this config (101 = the worker answers). Uses the TLS-hello
+    fragment when the link carries `fm` (Patt style), exactly like the scanner does. None = failed."""
+    p = parse_link(link)
+    if not p:
+        return None
+    pr = p["params"]
+    host = pr.get("host") or pr.get("sni") or p["addr"]
+    tls = pr.get("security", "tls") == "tls"
+    key = base64.b64encode(os.urandom(16)).decode()
+    try:
+        t0 = time.perf_counter()
+        ex = http_exchange(p["addr"], p["port"], pr.get("sni") or host, pr.get("path", "/"), tls, timeout, False,
+                           headers={"Host": host, "Connection": "Upgrade", "Upgrade": "websocket",
+                                    "Sec-WebSocket-Key": key, "Sec-WebSocket-Version": "13"},
+                           headers_only=True, fragment=bool(pr.get("fm")) and tls)
+        if ex.status == 101:
+            return max(1, int((time.perf_counter() - t0) * 1000))
+    except Exception:
+        pass
+    return None
+
+
+class VpnStore:
+    """Saved configs (survive restarts). Every build adds its configs here."""
+
+    def __init__(self, path):
+        self.path = path
+        self.items: list = []
+        self.sel = ""
+        self.patt = True
+        try:
+            d = json.loads(Path(path).read_text(encoding="utf-8"))
+            self.items, self.sel, self.patt = d.get("items", []), d.get("sel", ""), bool(d.get("patt", True))
+        except Exception:
+            pass
+
+    def save(self):
+        try:
+            Path(self.path).write_text(json.dumps({"items": self.items, "sel": self.sel, "patt": self.patt}), encoding="utf-8")
+        except Exception:
+            pass
+
+    def add(self, links, group="") -> int:
+        have = {i["link"] for i in self.items}
+        n = 0
+        for ln in links:
+            ln = ln.strip()
+            p = parse_link(ln)
+            if not p or ln in have:
+                continue
+            have.add(ln)
+            self.items.append({"id": hashlib.sha1(ln.encode()).hexdigest()[:10], "link": ln, "name": p["name"], "addr": p["addr"],
+                               "port": p["port"], "proto": p["proto"], "group": group or "imported", "ping": None,
+                               "added": time.strftime("%Y-%m-%d %H:%M")})
+            n += 1
+        if n and not self.get(self.sel):
+            self.sel = self.items[0]["id"]
+        if n:
+            self.save()
+        return n
+
+    def get(self, iid):
+        return next((i for i in self.items if i["id"] == iid), None)
+
+    def remove(self, iid):
+        self.items = [i for i in self.items if i["id"] != iid]
+        if self.sel == iid:
+            self.sel = self.items[0]["id"] if self.items else ""
+        self.save()
 
 
 # ───────────────────────────── robustness helpers ─────────────────────────────
@@ -2694,7 +2977,15 @@ class Wizard(BoxLayout):
         self.raw_page = 0
         self.sel_link = ""
         self._res_stamp = 0.0
+        self.mode = "builder"
+        self.vstore = VpnStore(APP_DIR / "vpn_configs.json")
+        self.vpn_rows: dict = {}
+        self.vpn_shown = 50
+        self._vpn_busy = False
+        self._vpn_stop = False
+        self._vpn_last = None
         self.build_ui()
+        Clock.schedule_interval(self._vpn_poll, 1.0)
         set_net_log(self.log)
         self.fill_from_cfg()
         self.apply_ports()
@@ -2705,6 +2996,9 @@ class Wizard(BoxLayout):
         if self.token:
             self.verify_token(silent=True)
         self.goto(0)
+        self.render_vpn_list()
+        if self.vstore.items:                      # once configs exist, the VPN page is always the first page
+            self.show_mode("vpn")
         Window.bind(on_keyboard=self._on_key)
 
     # ---------------------------------------------------------------- config
@@ -2743,9 +3037,13 @@ class Wizard(BoxLayout):
 
     def _on_key(self, _win, key, *_a):
         """Android back button: go one wizard step back (and let the system close the app on step 1)."""
-        if key == 27 and self.modal_open <= 0 and self.step > 0 and not self.busy:
-            self.goto(self.step - 1)
-            return True
+        if key == 27 and self.modal_open <= 0 and self.mode == "builder" and not self.busy:
+            if self.step > 0:
+                self.goto(self.step - 1)
+                return True
+            if self.vstore.items:
+                self.show_mode("vpn")
+                return True
         return False
 
     # ---------------------------------------------------------------- helpers
@@ -2963,6 +3261,338 @@ class Wizard(BoxLayout):
         self.scan_finished()
         self.toast(f"Loaded {len(res)} IPs from {d['saved']}")
 
+    # ================================================================ VPN page
+    def on_tab(self, label):
+        self.show_mode("vpn" if label == "VPN" else "builder")
+
+    def show_mode(self, mode):
+        self.mode = mode
+        self.v_tab.set("VPN" if mode == "vpn" else "Builder")
+        vpn = mode == "vpn"
+        if vpn and self.log_open:
+            self.toggle_log()
+        for w in (self.stepper, self._pb, self._nav):
+            collapse(w, vpn)
+        self.sm.transition.direction = "right" if vpn else "left"
+        self.sm.current = "vpn" if vpn else str(self.step)
+        if vpn:
+            self.refresh_vpn_status()
+        else:
+            self.update_nav()
+
+    def build_vpn_page(self, page):
+        c = raised(page)
+        ctr = AnchorLayout(size_hint_y=None, height=dp(150), anchor_x="center", anchor_y="center")
+        self.power = PowerButton(self.vpn_connect)
+        ctr.add_widget(self.power)
+        c.add_widget(ctr)
+        self.lbl_vstate = Text("Not connected", size=20, bold=True, halign="center")
+        c.add_widget(self.lbl_vstate)
+        self.lbl_vsel = Text("", color=SUB, size=13, halign="center")
+        c.add_widget(self.lbl_vsel)
+        self.v_patt = Var(self.vstore.patt)
+        c.add_widget(Check("Patt disguise (fragment + custom TLS)  -  same as PattN", self.v_patt, command=self.on_patt))
+        self.lbl_veng = self.note(c, "")
+        a = raised(page, "Configs")
+        self.lbl_vstat = Text("", color=SUB, size=12)
+        a.add_widget(self.lbl_vstat)
+        self.btn_vping = b_primary("Real ping all", lambda: self.vpn_ping_all(True), h=42)
+        self.btn_vtcp = b_soft("TCP ping all", lambda: self.vpn_ping_all(False), h=42)
+        self.btn_vstop = b_soft("Stop", self.vpn_stop_ping, h=42)
+        self.btn_vstop.configure(state="disabled")
+        a.add_widget(btn_grid(self.btn_vping, self.btn_vtcp, b_soft("Sort by ping", self.vpn_sort), self.btn_vstop,
+                              b_soft("Paste links / sub", self.vpn_paste), b_soft("Copy Xray JSON", self.vpn_copy_json),
+                              b_soft("Delete selected", self.vpn_delete), b_color("Clear all", self.vpn_clear, "#6a2434", "#8a3045")))
+        self.vpn_box = VBox(spacing=dp(6))
+        a.add_widget(self.vpn_box)
+
+    def on_patt(self):
+        self.vstore.patt = bool(self.v_patt.get())
+        self.vstore.save()
+
+    def cur_link(self, it=None):
+        it = it or self.vstore.get(self.vstore.sel)
+        if not it:
+            return ""
+        return patt_link(it["link"]) if self.v_patt.get() else it["link"]
+
+    def refresh_vpn_status(self):
+        it = self.vstore.get(self.vstore.sel)
+        n = len(self.vstore.items)
+        self.lbl_vsel.configure(text=(f"{it['name']}\n{it['addr']}:{it['port']}" if it else "No config selected"))
+        self.lbl_vstat.configure(text=f"{n} saved configs" if n else "Nothing saved yet - build configs in the Builder tab, or paste links.")
+
+    def render_vpn_list(self):
+        box = self.vpn_box
+        box.clear_widgets()
+        self.vpn_rows = {}
+        items = self.vstore.items
+        for it in items[:self.vpn_shown]:
+            row = CfgRow(it, self.vpn_select, selected=(it["id"] == self.vstore.sel))
+            self.vpn_rows[it["id"]] = row
+            box.add_widget(row)
+        if len(items) > self.vpn_shown:
+            box.add_widget(b_soft(f"Show more ({len(items) - self.vpn_shown} hidden)", self.vpn_more, h=40))
+        if not items:
+            box.add_widget(Text("The list is empty.", color=SUB, size=12))
+        self.refresh_vpn_status()
+
+    def vpn_more(self):
+        self.vpn_shown += 50
+        self.render_vpn_list()
+
+    def vpn_select(self, iid):
+        self.vstore.sel = iid
+        self.vstore.save()
+        for k, row in self.vpn_rows.items():
+            row.set_selected(k == iid)
+        self.refresh_vpn_status()
+
+    def vpn_autosave(self):
+        """After every build the new configs are stored on the VPN page."""
+        if not self.out or not self.rec:
+            return
+        links = self.out.get("links") or []
+        group = self.rec.get("remark") or self.rec.get("project") or "built"
+        n = self.vstore.add(links, group)
+        if n:
+            self.vpn_shown = max(self.vpn_shown, 50)
+            self.render_vpn_list()
+            self.toast(f"{n} configs saved to the VPN page")
+            self.log(f"{n} configs saved to the VPN page (group {group}).")
+
+    def vpn_paste(self):
+        try:
+            text = Clipboard.paste() or ""
+        except Exception:
+            text = ""
+        links = re.findall(r"(?:vless|trojan)://[^\s\"'<>]+", text)
+        if links:
+            n = self.vstore.add(links, "pasted")
+            self.render_vpn_list()
+            return self.toast(f"{n} new configs added" if n else "Those configs are already saved", GOOD if n else WARN)
+        m = re.search(r"https?://\S+", text)
+        if m:
+            self.toast("Reading the subscription...", ACC)
+            threading.Thread(target=self._vpn_fetch_sub, args=(m.group(0),), daemon=True).start()
+            return
+        try:                                                    # a bare base64 blob
+            links = links_from_base64(text.strip())
+        except Exception:
+            links = []
+        if links:
+            n = self.vstore.add(links, "pasted")
+            self.render_vpn_list()
+            self.toast(f"{n} new configs added")
+        else:
+            self.toast("No vless:// / trojan:// links or subscription found in the clipboard", WARN)
+
+    def _vpn_fetch_sub(self, url):
+        try:
+            r = web_session().get(url, timeout=25, headers={"User-Agent": "AminiumStudio"})
+            links = links_from_base64(r.text) or re.findall(r"(?:vless|trojan)://[^\s\"'<>]+", r.text)
+            n = self.vstore.add(links, "subscription")
+            self.after(0, lambda: (self.render_vpn_list(), self.toast(f"{n} configs added from the subscription")))
+        except Exception as e:
+            self.log(f"ERROR: could not read the subscription: {e}")
+
+    def vpn_delete(self):
+        if self.vstore.sel:
+            self.vstore.remove(self.vstore.sel)
+            self.render_vpn_list()
+
+    def vpn_clear(self):
+        def build(box, close):
+            box.add_widget(Text("Delete all saved configs?", size=16, bold=True))
+            box.add_widget(btn_row(b_color("Delete all", lambda: (close(), self._vpn_clear_now()), "#6a2434", "#8a3045", h=42),
+                                   b_soft("Cancel", close, h=42)))
+        self.modal(build)
+
+    def _vpn_clear_now(self):
+        self.vstore.items, self.vstore.sel = [], ""
+        self.vstore.save()
+        self.render_vpn_list()
+
+    def vpn_copy_json(self):
+        link = self.cur_link()
+        if not link:
+            return self.toast("Select a config first", WARN)
+        try:
+            self.copy_text(json.dumps(xray_json(link), indent=2), "Xray JSON copied.")
+        except Exception as e:
+            self.log(f"ERROR: could not build the Xray JSON: {e}")
+
+    def vpn_sort(self):
+        self.vstore.items.sort(key=lambda i: (i["ping"] is None or i["ping"] < 0, i["ping"] if (i["ping"] or 0) > 0 else 10 ** 9))
+        self.vstore.save()
+        self.render_vpn_list()
+
+    def vpn_stop_ping(self):
+        self._vpn_stop = True
+
+    def vpn_ping_all(self, real=True):
+        if self._vpn_busy or not self.vstore.items:
+            return
+        self._vpn_busy, self._vpn_stop = True, False
+        for b in (self.btn_vping, self.btn_vtcp):
+            b.configure(state="disabled")
+        self.btn_vstop.configure(state="normal")
+        items = list(self.vstore.items)
+        patt = bool(self.v_patt.get())
+
+        def one(it):
+            if self._vpn_stop:
+                return it, "skip"
+            try:
+                if real:
+                    return it, real_ping(patt_link(it["link"]) if patt else it["link"])
+                return it, tcp_ping(it["addr"], it["port"])
+            except Exception:
+                return it, None
+
+        def work():
+            done = 0
+            with ThreadPoolExecutor(max_workers=12) as ex:
+                for fut in as_completed([ex.submit(one, it) for it in items]):
+                    it, ms = fut.result()
+                    if ms == "skip":
+                        continue
+                    it["ping"] = ms if ms is not None else -1
+                    done += 1
+                    self.after(0, lambda it=it, d=done: self._vpn_ping_ui(it, d, len(items)))
+            self._vpn_busy = False
+            self.after(0, self._vpn_ping_done)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _vpn_ping_ui(self, it, done, total):
+        row = self.vpn_rows.get(it["id"])
+        if row:
+            row.set_ping(it["ping"])
+        self.lbl_vstat.configure(text=f"Pinged {done}/{total}")
+
+    def _vpn_ping_done(self):
+        self.vstore.save()
+        for b in (self.btn_vping, self.btn_vtcp):
+            b.configure(state="normal")
+        self.btn_vstop.configure(state="disabled")
+        alive = sum(1 for i in self.vstore.items if (i["ping"] or -1) > 0)
+        self.lbl_vstat.configure(text=f"{alive} of {len(self.vstore.items)} configs answered")
+        self.toast(f"{alive} configs answered", GOOD if alive else BAD)
+
+    # ---- built-in tunnel (Android VpnService + Xray core from libv2ray.aar)
+    def vpn_engine(self):
+        """The Java service class, or None when this build has no tunnel engine (desktop / built without the core)."""
+        if kplatform != "android":
+            return None
+        try:
+            from jnius import autoclass  # type: ignore
+            return autoclass(VPN_SERVICE)
+        except Exception:
+            return None
+
+    def vpn_state(self):
+        svc = self.vpn_engine()
+        if svc is None:
+            return "unavailable", ""
+        try:
+            return str(svc.state), str(svc.error)
+        except Exception:
+            return "unavailable", ""
+
+    def _vpn_poll(self, _dt=None):
+        st, err = self.vpn_state()
+        if st == self._vpn_last:
+            return
+        self._vpn_last = st
+        on = st == "running"
+        self.power.set_on(on)
+        if st == "running":
+            self.lbl_vstate.configure(text="Connected", text_color=GOOD)
+            self.toast("VPN connected - the key icon is in the status bar")
+        elif st == "starting":
+            self.lbl_vstate.configure(text="Connecting...", text_color=WARN)
+        elif st == "error":
+            self.lbl_vstate.configure(text="Connection failed", text_color=BAD)
+            self.log(f"ERROR: VPN: {err}")
+            self.toast(err[:80] or "VPN failed", BAD)
+        else:
+            self.lbl_vstate.configure(text="Not connected", text_color=TXT)
+        self.lbl_veng.configure(text="Engine: built-in Xray core" if st != "unavailable" else
+                                "Engine: external client (the built-in core is not in this build)")
+
+    def vpn_start_engine(self, link):
+        try:
+            from android import activity  # type: ignore
+            from jnius import autoclass  # type: ignore
+            vpn_cls = autoclass("android.net.VpnService")
+            act = autoclass("org.kivy.android.PythonActivity").mActivity
+            cfg = json.dumps(xray_tun_config(link))
+            intent_cls = autoclass("android.content.Intent")
+
+            def go():
+                i = intent_cls()
+                i.setClassName(act.getPackageName(), VPN_SERVICE)
+                i.setAction("START")
+                i.putExtra("config", cfg)
+                if autoclass("android.os.Build$VERSION").SDK_INT >= 26:
+                    act.startForegroundService(i)
+                else:
+                    act.startService(i)
+                self._vpn_last = ""
+                self.lbl_vstate.configure(text="Connecting...", text_color=WARN)
+            ask = vpn_cls.prepare(act)
+            if ask is None:
+                return go()
+            req = 4712
+
+            def on_result(request, result, data):
+                if request != req:
+                    return
+                try:
+                    activity.unbind(on_activity_result=on_result)
+                except Exception:
+                    pass
+                if result == -1:
+                    Clock.schedule_once(lambda dt: go(), 0)
+                else:
+                    Clock.schedule_once(lambda dt: self.toast("VPN permission was denied", BAD), 0)
+            activity.bind(on_activity_result=on_result)
+            act.startActivityForResult(ask, req)
+        except Exception as e:
+            self.log(f"ERROR: could not start the VPN: {e}")
+
+    def vpn_stop_engine(self):
+        try:
+            from jnius import autoclass  # type: ignore
+            act = autoclass("org.kivy.android.PythonActivity").mActivity
+            i = autoclass("android.content.Intent")()
+            i.setClassName(act.getPackageName(), VPN_SERVICE)
+            i.setAction("STOP")
+            act.startService(i)
+        except Exception as e:
+            self.log(f"ERROR: could not stop the VPN: {e}")
+
+    def vpn_connect(self):
+        it = self.vstore.get(self.vstore.sel)
+        if not it:
+            return self.toast("Build or paste configs first, then pick one", WARN)
+        link = self.cur_link(it)
+        st, _err = self.vpn_state()
+        if st in ("starting", "running"):
+            return self.vpn_stop_engine()
+        if st != "unavailable":
+            return self.vpn_start_engine(link)
+
+        def build(box, close):
+            box.add_widget(Text("Connect", size=16, bold=True))
+            box.add_widget(Text(f"{it['name']}\n{it['addr']}:{it['port']}", color=SUB, size=13))
+            box.add_widget(Text("The built-in tunnel engine is not in this build, so use an installed client "
+                                "(PattN, NPV, v2rayNG...). The link carries the Patt disguise when that switch is on.", color=SUB, size=12))
+            box.add_widget(b_primary("Open in installed client", lambda: (close(), self.open_url(link)), h=42))
+            box.add_widget(btn_row(b_soft("Copy link", lambda: (close(), self.copy_text(link, "Link copied.")), h=40),
+                                   b_soft("Share Xray JSON", lambda: (close(), self.share_text(json.dumps(xray_json(link), indent=2), "Xray config")), h=40)))
+        self.modal(build)
+
     # ---------------------------------------------------------------- shell
     def build_ui(self):
         with self.canvas.before:
@@ -2974,6 +3604,10 @@ class Wizard(BoxLayout):
         self._log_pending = False
         self._log_err = False
         self.add_widget(Banner())
+        tb = BoxLayout(size_hint_y=None, height=dp(54), padding=[dp(12), dp(6)])
+        self.v_tab = Var("Builder")
+        tb.add_widget(Seg(["VPN", "Builder"], self.v_tab, self.on_tab, h=42))
+        self.add_widget(tb)
         self.stepper = Stepper(STEPS, lambda i: (not self.busy) and self.goto(i))
         self.add_widget(self.stepper)
         self.sm = ScreenManager(transition=SlideTransition(duration=0.22))
@@ -2987,12 +3621,21 @@ class Wizard(BoxLayout):
             scr.add_widget(sv)
             self.sm.add_widget(scr)
             self.pages.append(body)
+        vscr = Screen(name="vpn")
+        vsv = ScrollView(do_scroll_x=False, bar_width=dp(3), bar_color=C(ACC, 0.7), bar_inactive_color=C(ACC, 0.25),
+                         scroll_type=["bars", "content"])
+        self.vpn_page = VBox(padding=[dp(12), dp(6), dp(12), dp(24)], spacing=dp(12))
+        vsv.add_widget(self.vpn_page)
+        vscr.add_widget(vsv)
+        self.sm.add_widget(vscr)
         self.add_widget(self.sm)
+        self.build_vpn_page(self.vpn_page)
         self.build_step_token(self.pages[0])
         self.build_step_scan(self.pages[1])
         self.build_step_build(self.pages[2])
         self.build_step_out(self.pages[3])
         pb = BoxLayout(size_hint_y=None, height=dp(14), padding=[dp(14), dp(3)])
+        self._pb = pb
         self.progress = Bar(size_hint_y=1)
         pb.add_widget(self.progress)
         self.add_widget(pb)
@@ -3009,6 +3652,7 @@ class Wizard(BoxLayout):
         for b in (self.btn_back, self.btn_log, self.btn_next):
             nav.add_widget(b)
         self.add_widget(nav)
+        self._nav = nav
 
     def gate(self) -> bool:
         if self.busy:
@@ -3039,11 +3683,13 @@ class Wizard(BoxLayout):
         i = max(0, min(len(STEPS) - 1, i))
         self.sm.transition.direction = "left" if i > self.step else "right"
         self.step = i
-        self.sm.current = str(i)
+        if self.mode == "builder":
+            self.sm.current = str(i)
         if i == 2:
             self.refresh_build_summary()
         if i == 3:
             self.render_output()
+            self.vpn_autosave()
         self.update_nav()
 
     def on_next(self):
