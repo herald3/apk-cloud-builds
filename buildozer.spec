@@ -1,5 +1,5 @@
 [app]
-p4a.branch = master
+p4a.branch = v2024.01.21
 title = Aminium Studio
 package.name = aminiumstudio
 package.domain = org.aminium
