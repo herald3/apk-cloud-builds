@@ -2597,6 +2597,77 @@ def raised(parent, title=None):
     return card
 
 
+# ───────────────────────────── robustness helpers ─────────────────────────────
+def _crash_log(text):
+    try:
+        with open(APP_DIR / "crash.log", "a", encoding="utf-8") as fh:
+            fh.write(time.strftime("[%Y-%m-%d %H:%M:%S] ") + text + "\n")
+    except Exception:  # pragma: no cover
+        pass
+
+
+def _report(text):
+    _crash_log(text)
+    try:
+        app = App.get_running_app()
+        if app is not None and getattr(app, "wiz", None) is not None:
+            app.wiz.log("ERROR: internal error (details in crash.log): " + text.strip().splitlines()[-1][:160])
+    except Exception:  # pragma: no cover
+        pass
+
+
+def _install_safety_nets():
+    """A bug in the UI must not close the whole app; background-thread errors are written to crash.log as well."""
+    import traceback
+    try:
+        from kivy.base import ExceptionHandler, ExceptionManager
+
+        class _SafeHandler(ExceptionHandler):
+            def handle_exception(self, inst):
+                _report("UI error:\n" + "".join(traceback.format_exception(type(inst), inst, inst.__traceback__)))
+                return ExceptionManager.PASS
+        ExceptionManager.add_handler(_SafeHandler())
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        def _thread_hook(args):
+            _report("Thread error:\n" + "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)))
+        threading.excepthook = _thread_hook
+    except Exception:  # pragma: no cover
+        pass
+
+
+def vpn_active() -> bool:
+    """True when Android reports an active VPN (scan / test results through a VPN are meaningless)."""
+    if kplatform != "android":
+        return False
+    try:
+        from jnius import autoclass  # type: ignore
+        act = autoclass("org.kivy.android.PythonActivity").mActivity
+        ctx = autoclass("android.content.Context")
+        caps_cls = autoclass("android.net.NetworkCapabilities")
+        cm = act.getSystemService(ctx.CONNECTIVITY_SERVICE)
+        for n in cm.getAllNetworks():
+            caps = cm.getNetworkCapabilities(n)
+            if caps is not None and caps.hasTransport(caps_cls.TRANSPORT_VPN):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+class LoadedScan:
+    """A scan restored from disk (looks like a finished ScanJob to the wizard)."""
+    phase = "done"
+
+    def __init__(self, snap):
+        self._s = snap
+        self.stop = threading.Event()
+
+    def snapshot(self):
+        return self._s
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  PART 6 - the wizard
 # ════════════════════════════════════════════════════════════════════════════
@@ -2630,6 +2701,7 @@ class Wizard(BoxLayout):
         self.roll_all()                       # every launch: new random name / password / paths / UUID (hidden from the user)
         self.log("New random name, password, paths and UUID generated for this launch; every scan draws fresh random IPv4/IPv6 addresses.")
         self.refresh_token_view()
+        self.refresh_last_scan()
         if self.token:
             self.verify_token(silent=True)
         self.goto(0)
@@ -2650,7 +2722,7 @@ class Wizard(BoxLayout):
             "source": self.e_source.get().strip(), "custom_domain": self.e_domain.get().strip(), "decoy": self.e_decoy.get().strip(),
             "proxy": self.e_proxy.get().strip(), "tg_token": self.e_tgtoken.get().strip(), "tg_secret": self.e_tgsecret.get().strip(),
             "tg_admins": self.e_tgadmins.get().strip(), "verify_ws": bool(self.v_verify_ws.get()),
-            "remark": self.e_remark.get().strip(), "max_cfg": self.e_maxcfg.get().strip(), "ports_tls": self.chosen_ports(True), "ports_plain": self.chosen_ports(False), "scan": sf, "deployments": self.deployments,
+            "remark": self.e_remark.get().strip(), "custom": self.custom_on(), "max_cfg": self.e_maxcfg.get().strip(), "ports_tls": self.chosen_ports(True), "ports_plain": self.chosen_ports(False), "scan": sf, "deployments": self.deployments,
         }
         try:
             CFG_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -2762,6 +2834,7 @@ class Wizard(BoxLayout):
             self.log(f"Could not copy: {e}")
             return
         self.log(what)
+        self.toast(what)
 
     def toggle_log(self):
         self.log_open = not self.log_open
@@ -2793,6 +2866,102 @@ class Wizard(BoxLayout):
             box.add_widget(Text(text, color=SUB, size=13))
             box.add_widget(Btn("OK", close, kind="primary", h=42))
         self.modal(build)
+
+    def toast(self, text, color=GOOD):
+        """Small floating message at the bottom (auto fades)."""
+        try:
+            lb = Label(text=str(text), color=C(TXT), font_size=sp(13), halign="center", valign="middle")
+            lb.texture_update()
+            w = min(Window.width - dp(32), lb.texture_size[0] + dp(36))
+            box = Panel(bg="#17214d", radius=14, border=color, size_hint=(None, None), size=(w, dp(42)))
+            box.add_widget(lb)
+            box.pos = ((Window.width - w) / 2.0, dp(96))
+            box.opacity = 0
+            Window.add_widget(box)
+            anim = Animation(opacity=1, d=0.15) + Animation(opacity=1, d=1.5) + Animation(opacity=0, d=0.3)
+            anim.bind(on_complete=lambda *_: Window.remove_widget(box))
+            anim.start(box)
+        except Exception:  # pragma: no cover
+            pass
+
+    def share_text(self, text, title="Share"):
+        """Android share sheet (Telegram, Messages, ...). Elsewhere: copy."""
+        if kplatform == "android":
+            try:
+                from jnius import autoclass  # type: ignore
+                Intent = autoclass("android.content.Intent")
+                act = autoclass("org.kivy.android.PythonActivity").mActivity
+                it = Intent(Intent.ACTION_SEND)
+                it.setType("text/plain")
+                it.putExtra(Intent.EXTRA_TEXT, text)
+                act.startActivity(Intent.createChooser(it, title))
+                return
+            except Exception as e:
+                self.log(f"Share failed ({e}); copied instead.")
+        self.copy_text(text, "Copied.")
+
+    def guard_vpn(self, go):
+        if not vpn_active():
+            return go()
+
+        def build(box, close):
+            box.add_widget(Text("A VPN is active", size=16, bold=True, color=WARN))
+            box.add_widget(Text("Scanning or testing through a VPN gives wrong results: the IPs look clean for the VPN, not for your real "
+                                "network. Turn the VPN off first.", color=SUB, size=13))
+            box.add_widget(btn_row(b_primary("I turned it off", lambda: (close(), self.guard_vpn(go)), h=42),
+                                   b_soft("Continue anyway", lambda: (close(), go()), h=42)))
+        self.modal(build)
+
+    def on_scan_click(self):
+        self.guard_vpn(self.on_scan)
+
+    def on_build_click(self):
+        self.guard_vpn(self.on_build)
+
+    # last scan survives the app being closed / killed by Android
+    def _save_scan(self, s):
+        if not s or not s.get("results") or isinstance(self.job, LoadedScan):
+            return
+        try:
+            data = {"saved": time.strftime("%Y-%m-%d %H:%M"), "snapshot": s}
+            (APP_DIR / "last_scan.json").write_text(json.dumps(data, default=str), encoding="utf-8")
+        except Exception as e:
+            self.log(f"Could not save the scan: {e}")
+        self.refresh_last_scan()
+
+    def _read_last_scan(self):
+        try:
+            d = json.loads((APP_DIR / "last_scan.json").read_text(encoding="utf-8"))
+            if d["snapshot"]["results"]:
+                return d
+        except Exception:
+            pass
+        return None
+
+    def refresh_last_scan(self):
+        self.slot_last.clear_widgets()
+        d = self._read_last_scan()
+        if d:
+            n = len(d["snapshot"]["results"])
+            self.slot_last.add_widget(b_soft(f"Load last scan  ({n} IPs, {d['saved']})", self.load_last_scan, h=40))
+
+    def load_last_scan(self):
+        if self.busy or (self.job and self.job.phase in ("diagnosing", "scanning", "speed", "finishing")):
+            return
+        d = self._read_last_scan()
+        if not d:
+            return
+        snap = d["snapshot"]
+        snap["phase"] = "done"
+        snap.setdefault("reasons", {})
+        self.job = LoadedScan(snap)
+        self.shown_found = -1
+        res = snap["results"]
+        self.big_found.configure(text=str(len(res)))
+        self.big_tested.configure(text=str(snap.get("tested", "")))
+        self.big_best.configure(text=str(min(r["total"] for r in res)))
+        self.scan_finished()
+        self.toast(f"Loaded {len(res)} IPs from {d['saved']}")
 
     # ---------------------------------------------------------------- shell
     def build_ui(self):
@@ -3050,7 +3219,9 @@ class Wizard(BoxLayout):
             self.adv_box.add_widget(Check(text, var))
         self.s_custom = TextBox(h=84, size=12)
         self.field(self.adv_box, "Your own IPs / CIDR ranges, IPv4 or IPv6 (one per line, empty = all official Cloudflare ranges)", self.s_custom)
-        self.btn_scan = b_primary("Start scan", self.on_scan, h=48)
+        self.slot_last = Holder()
+        c.add_widget(self.slot_last)
+        self.btn_scan = b_primary("Start scan", self.on_scan_click, h=48)
         self.btn_stop = b_color("Stop", self.on_stop, "#7a2a3c", "#9a3548", h=48)
         self.btn_stop.configure(state="disabled")
         c.add_widget(btn_row(self.btn_scan, self.btn_stop, weights=[2, 1]))
@@ -3213,6 +3384,7 @@ class Wizard(BoxLayout):
         self.disc.mode = "idle"
         s = self.job.snapshot() if self.job else None
         if s:
+            self._save_scan(s)
             self.fill_tree(s["results"])
             self.disc.set_blips([(r["ip"], r["score"]) for r in s["results"]])
             self.disc.caption = f"{s['found']} clean IPs" if s["results"] else "nothing found - see the log"
@@ -3233,10 +3405,16 @@ class Wizard(BoxLayout):
         self.v_mode = Var(MODE_WORKERS)
         self.field(c, "Deploy to", Seg([MODE_WORKERS, MODE_PAGES], self.v_mode, size=12))
         self.note(c, "Tip: pages.dev is filtered on many networks (the config's SNI is that name). Workers or your own domain is safer.")
-        self.e_remark, _ = self.row(c, "Config name", placeholder="Aminium")
-        self.note(c, "Every config shows up in your VPN app as  NAME-vless-IP-port.  English letters, digits, - . _  (max 24).")
-        self.e_maxcfg, _ = self.row(c, "Max configs (total)", placeholder="150", numeric=True)
-        self.note(c, "Total number of configs is kept at or below this (IPs x ports x 2 protocols). Fewer ports = more IPs fit in.")
+        self.v_custom = Var(False)
+        c.add_widget(Check("Customize config name / ports / limit  (OFF = built exactly like the original PC app)", self.v_custom,
+                           command=self.toggle_custom))
+        self.slot_custom = Holder()
+        c.add_widget(self.slot_custom)
+        self.custom_box = VBox(spacing=dp(9))
+        self.e_remark, _ = self.row(self.custom_box, "Config name", placeholder="Aminium")
+        self.note(self.custom_box, "Every config shows up in your VPN app as  NAME-vless-IP-port.  English letters, digits, - . _  (max 24).")
+        self.e_maxcfg, _ = self.row(self.custom_box, "Max configs (total)", placeholder="150", numeric=True)
+        self.note(self.custom_box, "Total number of configs is kept at or below this (IPs x ports x 2 protocols). Fewer ports = more IPs fit in.")
         self.v_ports = {p: Var(True) for p in TLS_PORTS + PLAIN_PORTS}
         self.ports_tls_box, self.ports_plain_box = VBox(spacing=dp(2)), VBox(spacing=dp(2))
         for box, plist in ((self.ports_tls_box, TLS_PORTS), (self.ports_plain_box, PLAIN_PORTS)):
@@ -3248,7 +3426,7 @@ class Wizard(BoxLayout):
                 g2.add_widget(ck)
             box.add_widget(g2)
         self.slot_ports = Holder()
-        self.field(c, "Ports the configs may use (tick the ones that work on your network)", self.slot_ports)
+        self.field(self.custom_box, "Ports the configs may use (tick the ones that work on your network)", self.slot_ports)
         set_children(self.slot_ports, self.ports_tls_box)
         self.v_verify_ws = Var(True)
         c.add_widget(Check("Test the IPs on my new worker (real WebSocket, with and without TLS fragment)", self.v_verify_ws))
@@ -3279,7 +3457,7 @@ class Wizard(BoxLayout):
         self.v_d1 = Var(True)
         self.adv3.add_widget(Check("Create D1 database (traffic quotas)", self.v_d1))
         self.adv3.add_widget(b_soft("Re-roll random values", self.roll_all, h=40))
-        self.btn_build = b_primary("Build my configs", self.on_build, h=52, size=16)
+        self.btn_build = b_primary("Build my configs", self.on_build_click, h=52, size=16)
         c.add_widget(self.btn_build)
 
         c2 = raised(page)
@@ -3308,9 +3486,10 @@ class Wizard(BoxLayout):
     def refresh_build_summary(self):
         n = len(self.ips)
         tls = self.v_conn.get() == "TLS"
-        ports = len(self.chosen_ports(tls))
+        ports = len(self.chosen_ports(tls)) if self.custom_on() else len(TLS_PORTS if tls else PLAIN_PORTS)
         n = min(n, self.keep_limit())
-        self.lbl_sum.configure(text=f"{n} clean IPs (+ your worker's own address)  \u00d7  {ports} ports  \u00d7  2 protocols\n=  up to {min((n + 1) * ports * 2, self.max_cfg())} configs\n"
+        cap = self.max_cfg() if self.custom_on() else 10 ** 9
+        self.lbl_sum.configure(text=f"{n} clean IPs (+ your worker's own address)  \u00d7  {ports} ports  \u00d7  2 protocols\n=  up to {min((n + 1) * ports * 2, cap)} configs\n"
                                     f"Connection: {'TLS' if tls else 'No TLS'}")
         self.disc2.set_blips([(r["ip"], r["score"]) for r in (self.job.snapshot()["results"] if self.job else [])])
         self.disc2.caption = "ready"
@@ -3327,6 +3506,16 @@ class Wizard(BoxLayout):
         self.set_entry(self.e_wspath, "/stream/" + rnd(18, LOWER))
         self.set_entry(self.e_cron, rnd(24))
         self.set_entry(self.e_uuid, str(uuidlib.uuid4()))
+
+    def custom_on(self) -> bool:
+        return bool(self.v_custom.get())
+
+    def toggle_custom(self):
+        if self.custom_on():
+            set_children(self.slot_custom, self.custom_box)
+        else:
+            self.slot_custom.clear_widgets()
+        self.apply_ports()
 
     def max_cfg(self) -> int:
         try:
@@ -3345,6 +3534,11 @@ class Wizard(BoxLayout):
     def apply_ports(self):
         """Push the chosen ports / limit into the engine (panel settings + link expansion + total cap)."""
         global MAX_LINKS
+        if not self.custom_on():            # exactly the original behaviour: all Cloudflare ports, no limit, no extras
+            PANEL_STYLE["ports"], PANEL_STYLE["portsHttp"] = list(TLS_PORTS), list(PLAIN_PORTS)
+            CHOSEN_PORTS.clear()
+            MAX_LINKS = 0
+            return
         PANEL_STYLE["ports"] = self.chosen_ports(True)
         PANEL_STYLE["portsHttp"] = self.chosen_ports(False)
         CHOSEN_PORTS[True], CHOSEN_PORTS[False] = PANEL_STYLE["ports"], PANEL_STYLE["portsHttp"]
@@ -3352,6 +3546,8 @@ class Wizard(BoxLayout):
 
     def keep_limit(self) -> int:
         """How many clean IPs fit under the config limit: (IPs + worker address) x ports x 2 protocols <= max."""
+        if not self.custom_on():
+            return self.keep_count()
         per = len(self.chosen_ports(self.v_conn.get() == "TLS")) * 2
         return max(1, min(self.keep_count(), self.max_cfg() // per - 1))
 
@@ -3491,6 +3687,8 @@ class Wizard(BoxLayout):
         self.set_entry(self.e_decoy, c.get("decoy", ""))
         self.set_entry(self.e_remark, c.get("remark", "Aminium"))
         self.set_entry(self.e_maxcfg, c.get("max_cfg") or "150")
+        self.v_custom.set(bool(c.get("custom", False)))
+        self.toggle_custom()
         for _p in TLS_PORTS:
             self.v_ports[_p].set(_p in (c.get("ports_tls") or TLS_PORTS))
         for _p in PLAIN_PORTS:
@@ -3548,7 +3746,7 @@ class Wizard(BoxLayout):
             "tg_secret": self.e_tgsecret.get(), "tg_admins": self.e_tgadmins.get(), "domain": self.e_domain.get().strip().lower(),
             "d1": bool(self.v_d1.get()), "verify_ws": bool(self.v_verify_ws.get()), "scan": self.scan_form(),
             "ips": list(self.pool or self.ips), "keep": self.keep_limit(), "tls": self.v_conn.get() == "TLS",
-            "remark": self.clean_remark(self.e_remark.get()),
+            "remark": self.clean_remark(self.e_remark.get()) if self.custom_on() else "",
         }
         threading.Thread(target=self.build_worker, args=(project, source, panel, mode, form), daemon=True).start()
 
@@ -3711,7 +3909,9 @@ class Wizard(BoxLayout):
             addrs = [host] + good
             self.stage("Writing the address list and settings into the panel...", 0.84)
             extra = dict(PANEL_STYLE)
-            extra.update(tls=f["tls"], fingerprint="chrome", remark=f["remark"])
+            extra.update(tls=f["tls"], fingerprint="chrome")
+            if f["remark"]:
+                extra["remark"] = f["remark"]
             panel_apply_clean(base, panel_path, f["pass"], addrs, self.log, extra=extra)
             ips = good
 
@@ -3772,7 +3972,8 @@ class Wizard(BoxLayout):
         top.add_widget(self.out_info)
         top.add_widget(btn_grid(b_soft("Open panel", self.out_open_panel), b_soft("Copy panel details", self.out_copy_details),
                                 b_color("Save all files + QR", self.out_save_all, "#1d8f63", "#27a574"),
-                                b_soft("Re-scan IPs", lambda: self.goto(1))))
+                                b_soft("Re-scan IPs", lambda: self.goto(1)),
+                                b_soft("Share all links", self.out_share_all), b_soft("Copy diagnostics", self.out_copy_diag)))
         self.v_tls_out = Var("TLS")
         self.field(top, "Style", Seg(["TLS", "No TLS"], self.v_tls_out, self.on_restyle))
         self.cb_fp = Pick(FINGERPRINTS, command=self.on_restyle)
@@ -3989,6 +4190,43 @@ class Wizard(BoxLayout):
             r = self.rec
             self.copy_text(f"Panel: {r['base']}{r['panel_path']}\nPassword: {r['password']}\nSub: {r.get('sub', '')}", "Panel details copied.")
 
+    def out_share_all(self):
+        if not self.out:
+            return self.log("Nothing to share yet.")
+        links = self.out.get("links") or []
+        self.share_text("\n".join(links) if links else self.out.get("sub", ""), "Share configs")
+
+    def out_copy_diag(self):
+        """One block of text with everything needed to find out why configs do not connect (secrets masked)."""
+        rec = self.rec or {}
+        secrets_ = [x for x in (rec.get("password"), self.token) if x]
+
+        def mask(t):
+            t = re.sub(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "<uuid>", str(t))
+            for sct in secrets_:
+                t = t.replace(sct, "<secret>")
+            return t
+        try:
+            import certifi  # type: ignore
+            cert = certifi.where()
+        except Exception:
+            cert = "missing"
+        snap = self.job.snapshot() if self.job else {}
+        links = (self.out or {}).get("links") or []
+        with self._log_lock:
+            tail = list(self._log_lines[-40:])
+        lines = [
+            "Aminium Studio diagnostics  " + time.strftime("%Y-%m-%d %H:%M:%S"),
+            f"platform={kplatform}  python={sys.version.split()[0]}  {ssl.OPENSSL_VERSION}  kivy={getattr(kivy, '__version__', '?')}  certifi={cert}",
+            f"vpn_active={vpn_active()}  connection={self.v_conn.get()}  ports={self.chosen_ports(self.v_conn.get() == 'TLS')}  max_configs={self.max_cfg()}",
+            f"scan: found={snap.get('found')} tested={snap.get('tested')} total={snap.get('total')} elapsed={snap.get('elapsed')}s  reasons={snap.get('reasons')}",
+            f"deployment: base={rec.get('base')} tls={rec.get('tls')} fp={rec.get('fp')} remark={rec.get('remark')} ips_used={len(rec.get('ips') or [])}",
+            f"links={len(links)}",
+            "first links:", *[mask(x) for x in links[:3]],
+            "", "log tail:", *[mask(x) for x in tail],
+        ]
+        self.copy_text("\n".join(lines), "Diagnostics copied - paste it to me.")
+
     def out_save_all(self):
         if not (self.rec and self.out):
             return self.log("Nothing to save yet.")
@@ -4017,6 +4255,7 @@ class AminiumApp(App):
     title = APP_NAME
 
     def build(self):
+        _install_safety_nets()
         Window.clearcolor = C(BG)
         try:
             Window.softinput_mode = "below_target"
